@@ -95,6 +95,7 @@ export const defaultSite = {
   ],
   testimonios: [],
   portada: { media: {}, services: {}, order: [], hidden: [] },
+  theme: {},
   overrides: {},
   sections: [],
   seo: {},

@@ -25,6 +25,6 @@ export const stable = (v) =>
   );
 export const stripPub = (p) => {
   if (!p) return null;
-  const { public: _p, publishedAt: _t, ...rest } = p;
+  const { public: _p, publishedAt: _t, changeNote: _n, changes: _c, publishedBy: _b, ...rest } = p;
   return rest;
 };

@@ -140,7 +140,7 @@ async function api(request, env, url) {
   if ((r = p.match(/^\/api\/history\/([a-z_]+)$/)) && m === 'GET') {
     const def = CONTENT[r[1]];
     need(def && (def.read === null || can(user, def.read)), 403, 'Sin permiso');
-    const { results } = await env.DB.prepare('SELECT id, saved_at, saved_by FROM content_history WHERE key = ? ORDER BY id DESC LIMIT 40').bind(r[1]).all();
+    const { results } = await env.DB.prepare("SELECT id, saved_at, saved_by, json_extract(value, '$.changeNote') AS note, json_extract(value, '$.changes') AS changes, json_extract(value, '$.publishedAt') AS published_at, json_extract(value, '$.publishedBy') AS published_by FROM content_history WHERE key = ? ORDER BY id DESC LIMIT 60").bind(r[1]).all();
     return json(results);
   }
   if ((r = p.match(/^\/api\/history\/item\/(\d+)$/)) && m === 'GET') {
