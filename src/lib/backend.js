@@ -1,122 +1,78 @@
-// Capa de datos. Con Supabase configurado guarda en la nube (y la página pública lee
-// lo publicado). Sin configuración funciona en "modo local": todo queda en este navegador.
-import { createClient } from '@supabase/supabase-js';
+// Comunicación con el servidor del panel (worker/index.js), que usa la base D1 de For Winners.
 
-const URL = import.meta.env.VITE_SUPABASE_URL;
-const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const EMAIL = import.meta.env.VITE_ADMIN_EMAIL;
-
-export const isCloud = Boolean(URL && KEY && EMAIL && !URL.includes('xxxxxxxx'));
-const sb = isCloud ? createClient(URL, KEY) : null;
-
-// ---------- modo local ----------
-const LS = 'fw-admin:';
-const LOCAL_PASS_KEY = `${LS}pass`;
-const DEFAULT_LOCAL_PASS = 'forwinners';
-
-async function sha256(text) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+export class ApiError extends Error {
+  constructor(status, message, data) {
+    super(message);
+    this.status = status;
+    this.data = data;
+  }
 }
-const lsGet = (k) => {
+
+async function call(method, path, payload, raw) {
+  const opts = { method, credentials: 'same-origin', headers: {} };
+  if (raw) {
+    opts.body = raw;
+    opts.headers['Content-Type'] = raw.type;
+  } else if (payload !== undefined) {
+    opts.body = JSON.stringify(payload);
+    opts.headers['Content-Type'] = 'application/json';
+  }
+  let res;
   try {
-    const v = localStorage.getItem(LS + k);
-    return v ? JSON.parse(v) : null;
+    res = await fetch(`/api/${path}`, opts);
   } catch {
-    return null;
+    throw new ApiError(0, 'Sin conexión. Revisa tu internet e inténtalo otra vez.');
   }
-};
-const lsSet = (k, v) => {
-  try {
-    localStorage.setItem(LS + k, JSON.stringify(v));
-  } catch (e) {
-    console.warn('No se pudo guardar localmente', e);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401 && path !== 'login') window.dispatchEvent(new Event('fw:logout'));
+    throw new ApiError(res.status, data.error || 'Algo salió mal', data);
   }
-};
-
-// ---------- sesión ----------
-export async function currentSession() {
-  if (isCloud) {
-    const { data } = await sb.auth.getSession();
-    return Boolean(data.session);
-  }
-  return sessionStorage.getItem(`${LS}session`) === '1';
-}
-
-export async function login(password) {
-  if (isCloud) {
-    const { error } = await sb.auth.signInWithPassword({ email: EMAIL, password });
-    if (error) throw new Error('Contraseña incorrecta');
-    return;
-  }
-  const stored = localStorage.getItem(LOCAL_PASS_KEY) || (await sha256(DEFAULT_LOCAL_PASS));
-  if ((await sha256(password)) !== stored) throw new Error('Contraseña incorrecta');
-  sessionStorage.setItem(`${LS}session`, '1');
-}
-
-export async function logout() {
-  if (isCloud) await sb.auth.signOut();
-  sessionStorage.removeItem(`${LS}session`);
-}
-
-export async function changePassword(newPassword) {
-  if (newPassword.length < 8) throw new Error('Usa al menos 8 caracteres');
-  if (isCloud) {
-    const { error } = await sb.auth.updateUser({ password: newPassword });
-    if (error) throw error;
-    return;
-  }
-  localStorage.setItem(LOCAL_PASS_KEY, await sha256(newPassword));
-}
-
-// ---------- contenido ----------
-export async function load(key) {
-  if (!isCloud) return lsGet(key);
-  const { data, error } = await sb.from('content').select('value').eq('key', key).maybeSingle();
-  if (error) throw error;
-  return data?.value ?? null;
-}
-
-export async function save(key, value) {
-  if (!isCloud) return lsSet(key, value);
-  const { error } = await sb
-    .from('content')
-    .upsert({ key, value, updated_at: new Date().toISOString() });
-  if (error) throw error;
-}
-
-export async function history(key) {
-  if (!isCloud) return [];
-  const { data, error } = await sb
-    .from('content_history')
-    .select('id, saved_at, value')
-    .eq('key', key)
-    .order('saved_at', { ascending: false })
-    .limit(30);
-  if (error) throw error;
   return data;
 }
 
-/** URL pública desde la que la página principal lee el contenido publicado. */
-export const publicEndpoint = isCloud
-  ? { url: URL, anonKey: KEY }
-  : null;
+export const api = {
+  get: (p) => call('GET', p),
+  post: (p, b) => call('POST', p, b ?? {}),
+  patch: (p, b) => call('PATCH', p, b),
+  put: (p, b) => call('PUT', p, b),
+  del: (p) => call('DELETE', p),
+};
 
-/** Sube una imagen y devuelve su URL pública. En modo local la guarda dentro del contenido. */
+export const me = () => api.get('me');
+export const login = (username, password) => api.post('login', { username, password });
+export const logout = () => api.post('logout');
+export const changePassword = (current, password) => api.post('password', { current, password });
+
+export const loadDoc = (key) => api.get(`content/${key}`);
+export const saveDoc = (key, value, version) => api.put(`content/${key}`, { value, version });
+export const history = (key) => api.get(`history/${key}`);
+export const historyItem = (id) => api.get(`history/item/${id}`);
+
+/** Tablas de gestión (estudiantes, pagos, etc.) */
+export const db = {
+  list: (t, filters = {}) =>
+    api.get(`t/${t}?${new URLSearchParams(Object.entries(filters).map(([k, v]) => [`f_${k}`, v]))}`),
+  add: (t, row) => api.post(`t/${t}`, row),
+  addMany: (t, rows) => api.post(`t/${t}/bulk`, { rows }),
+  update: (t, id, row) => api.patch(`t/${t}/${id}`, row),
+  remove: (t, id) => api.del(`t/${t}/${id}`),
+};
+
+/** Reduce la imagen en el navegador y la sube. Devuelve la ruta pública (/m/…) en forwinnersec.com. */
 export async function uploadImage(file) {
-  if (file.size > 5 * 1024 * 1024) throw new Error('La imagen pesa más de 5 MB');
-  if (!isCloud) {
-    if (file.size > 400 * 1024) throw new Error('En modo local usa imágenes de menos de 400 KB (o pega un enlace)');
-    return new Promise((res, rej) => {
-      const r = new FileReader();
-      r.onload = () => res(r.result);
-      r.onerror = rej;
-      r.readAsDataURL(file);
-    });
+  if (!file.type.startsWith('image/')) throw new Error('Elige una imagen');
+  let blob = file;
+  if (!/svg|gif/.test(file.type)) {
+    const img = await createImageBitmap(file);
+    const scale = Math.min(1, 1800 / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(img.width * scale);
+    c.height = Math.round(img.height * scale);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    blob = await new Promise((r) => c.toBlob(r, 'image/webp', 0.82));
   }
-  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const path = `site/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const { error } = await sb.storage.from('media').upload(path, file, { contentType: file.type });
-  if (error) throw error;
-  return sb.storage.from('media').getPublicUrl(path).data.publicUrl;
+  if (blob.size > 1_800_000) throw new Error('La imagen es muy pesada (máximo 1,8 MB)');
+  const { url } = await call('POST', 'media', undefined, blob);
+  return url;
 }

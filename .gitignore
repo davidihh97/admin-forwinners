@@ -4,3 +4,4 @@ dist
 .env.local
 *.log
 capturas
+.dev.vars

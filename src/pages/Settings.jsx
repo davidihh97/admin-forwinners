@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Download, Upload, KeyRound, RotateCcw, Plus, Trash2, FileSpreadsheet, History } from 'lucide-react';
 import { useStore, SEED } from '../lib/store';
-import { changePassword, isCloud, history } from '../lib/backend';
+import { changePassword, history, historyItem } from '../lib/backend';
 import { allCourses, routeStats, spaceStats } from '../lib/calc';
 import { hoursOf, uid } from '../lib/time';
 import { PageHead, Num, Text } from '../components/ui';
@@ -21,20 +21,21 @@ const PARAMS = [
 ];
 
 export default function Settings() {
-  const { data, ops, site, notify } = useStore();
-  const [pass, setPass] = useState({ a: '', b: '' });
+  const { data, ops, site, notify, can, user } = useStore();
+  const owner = user.role === 'owner';
+  const [pass, setPass] = useState({ cur: '', a: '', b: '' });
   const [hist, setHist] = useState(null);
   const setP = (k) => (v) => ops.update((d) => { d.params[k] = v; });
 
   useEffect(() => {
-    if (isCloud) history('operations').then(setHist).catch(() => setHist([]));
+    history('operations').then(setHist).catch(() => setHist([]));
   }, []);
 
   async function savePass() {
     if (pass.a !== pass.b) return notify('Las contraseñas no coinciden', 'bad');
     try {
-      await changePassword(pass.a);
-      setPass({ a: '', b: '' });
+      await changePassword(pass.cur, pass.a);
+      setPass({ cur: '', a: '', b: '' });
       notify('Contraseña cambiada');
     } catch (e) {
       notify(e.message, 'bad');
@@ -90,7 +91,7 @@ export default function Settings() {
     <>
       <PageHead title="Ajustes" desc="Parámetros de precios, categorías, contraseña y respaldos." />
       <div className="grid g2">
-        <div className="card">
+        {can('ajustes') && <div className="card">
           <div className="card-h"><h2>Parámetros de precios y cursos</h2></div>
           <div className="grid g2">
             {PARAMS.map(([k, label, step]) => <Num key={k} label={label} step={step} value={data.params[k]} onChange={setP(k)} />)}
@@ -98,10 +99,10 @@ export default function Settings() {
             <Num label="Descuento preventa (%)" value={Math.round(data.params.descPreventa * 100)} onChange={(v) => setP('descPreventa')(v / 100)} />
           </div>
           <p className="small muted">Al cambiar cualquier valor, los precios de las rutas UTN y la rentabilidad se recalculan al instante.</p>
-        </div>
+        </div>}
 
         <div className="col" style={{ gap: 16 }}>
-          <div className="card">
+          {can('ajustes') && <div className="card">
             <div className="card-h"><h2 className="grow">Categorías del horario</h2>
               <button className="btn sm" onClick={() => ops.update((d) => { d.categories.push({ id: uid('cat'), name: 'Nueva categoría', color: '#64748b' }); })}><Plus size={14} /> Agregar</button>
             </div>
@@ -118,11 +119,12 @@ export default function Settings() {
                 </div>
               ))}
             </div>
-          </div>
+          </div>}
 
           <div className="card">
             <div className="card-h"><KeyRound size={18} /><h2>Cambiar contraseña</h2></div>
-            <div className="grid g2">
+            <Text label="Contraseña actual" type="password" autoComplete="current-password" value={pass.cur} onChange={(v) => setPass({ ...pass, cur: v })} />
+            <div className="grid g2" style={{ marginTop: 10 }}>
               <Text label="Nueva contraseña" type="password" autoComplete="new-password" value={pass.a} onChange={(v) => setPass({ ...pass, a: v })} />
               <Text label="Repítela" type="password" autoComplete="new-password" value={pass.b} onChange={(v) => setPass({ ...pass, b: v })} />
             </div>
@@ -131,7 +133,7 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 16 }}>
+      {owner && <div className="card" style={{ marginTop: 16 }}>
         <div className="card-h"><h2>Respaldos y exportación</h2></div>
         <div className="row">
           <button className="btn" onClick={exportExcel}><FileSpreadsheet size={16} /> Descargar Excel</button>
@@ -141,20 +143,20 @@ export default function Settings() {
             <RotateCcw size={16} /> Volver a los datos del Excel
           </button>
         </div>
-        {isCloud && hist && hist.length > 0 && (
+        {hist && hist.length > 0 && (
           <div style={{ marginTop: 16 }}>
             <div className="row" style={{ marginBottom: 8 }}><History size={16} /><b>Versiones anteriores (automáticas)</b></div>
             <div className="col" style={{ gap: 4 }}>
               {hist.slice(0, 10).map((h) => (
                 <div key={h.id} className="row small">
-                  <span className="grow">{new Date(h.saved_at).toLocaleString('es-EC')}</span>
-                  <button className="btn sm" onClick={() => confirm('¿Restaurar esta versión? (Puedes deshacer)') && ops.replace(h.value)}>Restaurar</button>
+                  <span className="grow">{new Date(`${h.saved_at.replace(' ', 'T')}Z`).toLocaleString('es-EC')} · {h.saved_by}</span>
+                  <button className="btn sm" onClick={async () => { if (confirm('¿Restaurar esta versión? (Puedes deshacer)')) ops.replace(await historyItem(h.id)); }}>Restaurar</button>
                 </div>
               ))}
             </div>
           </div>
         )}
-      </div>
+      </div>}
     </>
   );
 }

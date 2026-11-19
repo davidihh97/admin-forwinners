@@ -15,3 +15,16 @@ export function publicSnapshot(data) {
 export function buildPublished(site, data) {
   return { ...site, public: publicSnapshot(data), publishedAt: new Date().toISOString() };
 }
+
+// Postgres/D1 pueden reordenar claves: comparamos con las claves ordenadas.
+export const stable = (v) =>
+  JSON.stringify(v, (_k, x) =>
+    x && typeof x === 'object' && !Array.isArray(x)
+      ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => a.localeCompare(b)))
+      : x
+  );
+export const stripPub = (p) => {
+  if (!p) return null;
+  const { public: _p, publishedAt: _t, ...rest } = p;
+  return rest;
+};

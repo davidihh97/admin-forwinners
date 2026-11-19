@@ -1,76 +1,83 @@
 # For Winners · Panel de administración
 
-Panel privado (`admin.forwinnersec.com`) para:
+Panel privado en **admin.forwinnersec.com** para manejar For Winners y la página web sin tocar código.
 
-- **Administrar For Winners**: horario semanal visual (arrastrar y soltar), espacios y ocupación, cursos y precios, rutas y módulos UTN, rentabilidad, plan de clases por semana con avance, y un simulador de grupos.
-- **Diseñar la página principal** (`forwinnersec.com`) sin tocar código: secciones, textos, botones, colores, imágenes, barra de anuncios, contacto y SEO, con vista previa y botón **Publicar**.
-
-Los datos iniciales salen del Excel `For_Winners_Carga_Horaria_y_Espacios_v2.xlsx` (`src/data/seed.json`). Todas las fórmulas del Excel están en `src/lib/calc.js` y dan los mismos resultados.
+| Sección | Para qué sirve |
+|---|---|
+| Inicio | Resumen: horas, ocupación, choques de horario, avance de los planes |
+| Horario, Espacios, Cursos y precios, Plan de clases, Simulador | Lo que antes estaba en el Excel `For_Winners_Carga_Horaria_y_Espacios_v2.xlsx`, con las mismas fórmulas (`src/lib/calc.js`) |
+| Interesados | Lo que llega desde la web (simuladores, diagnóstico, test vocacional, contacto) en un tablero Nuevo → Contactado → Inscrito → Cerrado |
+| Estudiantes, Grupos | Fichas, inscripción en grupos con cupo mínimo, cuotas automáticas |
+| Pagos y cuotas | Cobros, cuotas vencidas, recordatorio por WhatsApp |
+| Asistencia, Notas de simulacros | Lista por clase (con el tema del plan) y avance en simulacros |
+| Profesores | Horas dictadas por mes y pago |
+| Recordatorios | Mensajes de WhatsApp listos: cuotas, simulacros, clases de mañana, interesados sin contactar |
+| Editor de la web | La página real de forwinnersec.com: clic en un texto, botón o imagen para cambiarlo; formularios para WhatsApp, aviso, precios, preguntas frecuentes, testimonios, portada; secciones nuevas; Google |
+| Usuarios | Cuentas para el equipo con permisos por sección |
 
 ## Cómo funciona
 
 ```
-admin.forwinnersec.com (este panel) ──guarda──► Supabase (base de datos + login + imágenes)
-                                                    │
-forwinnersec.com ── <script fw-content.js> ──lee lo publicado──┘
+admin.forwinnersec.com  (este repositorio: Worker + app React)
+        │  lee y escribe
+        ▼
+   Base D1 "for-winners-db"  ◄── la misma que ya usa forwinnersec.com
+        ▲
+        │  lee lo publicado (tabla content, clave site_published)
+forwinnersec.com  (repositorio for-winners-website)
 ```
 
-- **Login**: una sola contraseña. Es el único usuario de Supabase; el registro público está desactivado.
-- **Borrador y publicado**: lo que editas en el diseñador es un borrador; la web solo cambia cuando pulsas **Publicar**.
-- **Seguridad**: la web pública solo puede leer el contenido publicado (cursos visibles y horario). Costos, márgenes y planes de clase son privados.
-- **Deshacer / Rehacer** (Ctrl+Z / Ctrl+Y), guardado automático y versiones anteriores automáticas en la nube.
+- **Todo en Cloudflare**, sin servicios extra. El panel y la web comparten la base de datos.
+- **Borrador y publicado**: lo que se edita en el Editor de la web solo llega a forwinnersec.com al pulsar **Publicar** (tarda hasta 30 segundos en verse).
+- **Seguridad**: contraseñas con PBKDF2, sesión en cookie `HttpOnly`/`Secure`/`SameSite=Strict`, límite de 10 intentos de ingreso cada 15 minutos, permisos revisados en el servidor en cada petición. La web pública solo lee el contenido publicado; precios de costo, márgenes, estudiantes y pagos nunca salen del panel.
+- **Historial**: cada documento guarda copias automáticas (Ajustes → Versiones anteriores) y hay Deshacer/Rehacer.
 
 ## Puesta en marcha (una sola vez)
 
-### 1. Supabase (gratis)
-1. Crea un proyecto en <https://supabase.com>.
-2. **SQL Editor → New query** → pega `supabase/schema.sql` → **Run**.
-3. **Authentication → Providers → Email**: desactiva *Allow new users to sign up*.
-4. **Authentication → Users → Add user**: crea tu usuario (correo + contraseña). Esa será la contraseña del panel.
-5. **Project Settings → API**: copia *Project URL* y *anon public key*.
+Requisito: `forwinnersec.com` debe estar en Cloudflare (lo está si la web ya usa Workers).
 
-### 2. Publicar el panel en admin.forwinnersec.com (Vercel, gratis)
-1. En <https://vercel.com> → *Add New Project* → importa este repositorio.
-2. Variables de entorno (ver `.env.example`):
-   - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ADMIN_EMAIL` (el correo del paso 1.4).
-3. Build command `npm run build`, output `dist` (Vercel lo detecta solo).
-4. *Settings → Domains* → agrega `admin.forwinnersec.com`. En el proveedor del dominio crea el registro **CNAME** `admin` → `cname.vercel-dns.com`.
+1. **Base de datos**: en el repositorio `for-winners-website`, aplica la migración nueva:
+   ```bash
+   npx wrangler d1 migrations apply for-winners-db --remote
+   ```
+   y publica la web (`npx wrangler deploy`).
+2. **Contraseña inicial** del administrador (en este repositorio):
+   ```bash
+   npm install
+   npx wrangler secret put ADMIN_PASSWORD
+   ```
+3. **Publicar el panel**:
+   ```bash
+   npm run deploy
+   ```
+   Esto crea `admin.forwinnersec.com` automáticamente (ver `routes` en `wrangler.jsonc`).
+4. Entra a admin.forwinnersec.com, deja el usuario vacío y usa la contraseña del paso 2. Después cámbiala en **Ajustes**. Desde **Usuarios** puedes crear la cuenta de tu hermana con los permisos que elijas.
 
-### 3. Conectar la página principal (una sola vez)
-En el diseñador, **Conectar con la web** muestra el código exacto. Resumen:
-
-```html
-<!-- antes de </body> en forwinnersec.com -->
-<script src="https://admin.forwinnersec.com/fw-content.js"
-        data-url="https://XXXX.supabase.co" data-key="ANON_KEY" defer></script>
-
-<!-- donde quieras las secciones del diseñador -->
-<div id="fw-root"></div>
-<!-- o solo una sección, por su ancla -->
-<div data-fw-section="cursos"></div>
-
-<!-- textos que ya existen: si el panel no tiene valor, se queda el original -->
-<h1 data-fw="hero_titulo">Texto actual</h1>
-<a data-fw="boton_inscripcion" href="...">Inscríbete</a>
-```
-
-## Desarrollo
+## Desarrollo local
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm run build    # genera dist/ (panel + fw-content.js)
+npm run build
+npm run dev:api        # API + app en http://localhost:8788 (usa una base D1 local)
+npm run dev            # opcional: app con recarga en http://localhost:5173
 ```
 
-Sin variables de Supabase el panel funciona en **modo local** (datos solo en ese navegador, contraseña inicial `forwinners`), útil para probar.
+Crea un archivo `.dev.vars` (no se sube al repositorio):
+
+```
+ADMIN_PASSWORD=una-clave-de-prueba
+SITE_URL=http://localhost:8787
+```
+
+Para tener las tablas en local, aplica las migraciones de `for-winners-website` con `--local --persist-to <carpeta>` y arranca ambos proyectos con el mismo `--persist-to`.
 
 ## Estructura
 
 | Carpeta | Qué hay |
 |---|---|
-| `src/pages/` | Pantallas: Inicio, Horario, Espacios, Cursos y precios, Plan de clases, Simulador, Diseñador web, Ajustes |
-| `src/lib/calc.js` | Fórmulas (precios, cuotas, descuentos, ocupación, choques de horario, rentabilidad) |
-| `src/lib/backend.js` | Login, guardado y subida de imágenes (Supabase o modo local) |
-| `src/site/render.js` | Dibuja las secciones; lo usan la vista previa y la web pública |
-| `src/embed/fw-content.js` | Script que se inserta en forwinnersec.com |
-| `supabase/schema.sql` | Tablas, permisos e historial |
+| `worker/` | Servidor: login, usuarios y permisos (`schema.js`), documentos con historial, tablas, imágenes |
+| `src/pages/` | Pantallas del panel |
+| `src/lib/calc.js` | Fórmulas del Excel (precios, cuotas, descuentos, ocupación, choques, rentabilidad) |
+| `src/lib/people.js` | Cuotas, WhatsApp, fechas |
+| `src/site/` | Contenido inicial de la web y publicación |
+| `src/data/seed.json` | Datos iniciales sacados del Excel |

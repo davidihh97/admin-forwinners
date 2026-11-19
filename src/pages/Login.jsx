@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Lock } from 'lucide-react';
-import { login, isCloud } from '../lib/backend';
+import { login } from '../lib/backend';
 
 export default function Login({ onDone }) {
+  const [user, setUser] = useState('');
   const [pass, setPass] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -12,7 +13,7 @@ export default function Login({ onDone }) {
     setBusy(true);
     setErr('');
     try {
-      await login(pass);
+      await login(user.trim() || 'admin', pass);
       onDone();
     } catch (e2) {
       setErr(e2.message);
@@ -33,24 +34,18 @@ export default function Login({ onDone }) {
           </div>
         </div>
         <label className="field">
+          <span>Usuario</span>
+          <input id="login-user" autoComplete="username" placeholder="admin" value={user} onChange={(e) => setUser(e.target.value)} />
+        </label>
+        <label className="field">
           <span>Contraseña</span>
-          <input
-            type="password"
-            autoFocus
-            autoComplete="current-password"
-            value={pass}
-            onChange={(e) => setPass(e.target.value)}
-          />
+          <input id="login-pass" type="password" autoFocus autoComplete="current-password" value={pass} onChange={(e) => setPass(e.target.value)} />
         </label>
         {err && <div className="alert bad">{err}</div>}
         <button className="btn primary" disabled={!pass || busy} style={{ justifyContent: 'center', padding: 12 }}>
           <Lock size={16} /> {busy ? 'Verificando…' : 'Entrar'}
         </button>
-        {!isCloud && (
-          <div className="alert info small">
-            Modo local (sin base de datos conectada). Contraseña inicial: <b>forwinners</b>. Cámbiala en Ajustes.
-          </div>
-        )}
+        <p className="small muted" style={{ margin: 0 }}>Si eres el administrador, puedes dejar el usuario vacío.</p>
       </form>
     </div>
   );
