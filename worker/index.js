@@ -1,6 +1,7 @@
 // Servidor del panel (admin.forwinnersec.com): sirve la aplicación y su API.
 // Usa la misma base D1 que forwinnersec.com.
 import { MODULES, OPS_KEYS, CONTENT, TABLES } from './schema.js';
+import { ensureSchema, kiosk, audit, describeRow, entityName, summary } from './extra.js';
 
 const COOKIE = 'fw_admin';
 const SESSION_DAYS = 30;
@@ -112,6 +113,9 @@ async function api(request, env, url) {
   const p = url.pathname;
   const m = request.method;
   need(env.DB, 500, 'Falta la base de datos (binding DB en wrangler.jsonc)');
+  await ensureSchema(env);
+  // Enlace público de firma de asistencia (protegido por su propia clave, sin sesión).
+  if (p.startsWith('/api/kiosk/')) return kiosk(request, env, url);
 
   if (p === '/api/login' && m === 'POST') return login(request, env);
   if (p === '/api/logout' && m === 'POST') {
@@ -136,6 +140,13 @@ async function api(request, env, url) {
   }
 
   let r;
+  if (p === '/api/summary' && m === 'GET') return json(await summary(env, (mods) => can(user, mods)));
+  if ((r = p.match(/^\/api\/attendance\/(\d+)\/signatures$/)) && m === 'GET') {
+    need(can(user, ['asistencia', 'estudiantes', 'profesores']), 403, 'Sin permiso');
+    const row = await env.DB.prepare('SELECT sign_in, sign_out FROM attendance_log WHERE id = ?').bind(Number(r[1])).first();
+    need(row, 404, 'No encontrado');
+    return json(row);
+  }
   if ((r = p.match(/^\/api\/content\/([a-z_]+)$/))) return content(request, env, user, r[1]);
   if ((r = p.match(/^\/api\/history\/([a-z_]+)$/)) && m === 'GET') {
     const def = CONTENT[r[1]];
@@ -176,6 +187,7 @@ async function login(request, env) {
     u = null;
   }
   need(u, 401, 'Usuario o contraseña incorrectos');
+  await audit(env, u, 'ingresar', 'admin_users', u.id, u.display_name || u.username, true);
   const token = b64u(crypto.getRandomValues(new Uint8Array(32)));
   const maxAge = SESSION_DAYS * 86400;
   await env.DB.batch([
@@ -201,11 +213,13 @@ async function content(request, env, user, key) {
   if (row && b.version !== undefined && b.version !== row.updated_at)
     return json({ error: 'Alguien más guardó cambios. Se cargó la versión más reciente.', value: JSON.parse(row.value), version: row.updated_at }, 409);
 
+  const changedKeys = [];
   if (def.write === 'ops' && row) {
     // (Si aún no existe, es la primera copia de los datos iniciales del Excel.)
     const old = JSON.parse(row.value);
     for (const k of new Set([...Object.keys(old), ...Object.keys(b.value)])) {
       if (JSON.stringify(old[k]) === JSON.stringify(b.value[k])) continue;
+      changedKeys.push(k);
       need(can(user, OPS_KEYS[k] || ['ajustes']), 403, `No tienes permiso para cambiar "${k}"`);
     }
   } else if (def.write !== 'ops') {
@@ -226,6 +240,10 @@ async function content(request, env, user, key) {
   );
   stmts.push(env.DB.prepare("DELETE FROM content_history WHERE key = ? AND id NOT IN (SELECT id FROM content_history WHERE key = ? ORDER BY id DESC LIMIT 200)").bind(key, key));
   await env.DB.batch(stmts);
+  const OPS_NAMES = { schedule: 'Horario', spaces: 'Espacios', categories: 'Categorías', params: 'Tarifas y parámetros', courses: 'Cursos', routes: 'Rutas UTN', modules: 'Módulos UTN', hiddenCourses: 'Cursos visibles', plans: 'Plan de clases' };
+  if (key === 'operations' && changedKeys.length) await audit(env, user, 'editar', key, null, changedKeys.map((k) => OPS_NAMES[k] || k).join(', '), true);
+  if (key === 'site_published') await audit(env, user, 'publicar', key, null, b.value.changeNote || `${(b.value.changes || []).length} cambios`);
+  if (key === 'kiosk') await audit(env, user, 'editar', key, null, b.value.active ? 'Enlace activo' : 'Enlace desactivado', true);
   return json({ ok: true, version: now });
 }
 
@@ -259,6 +277,7 @@ async function users(request, env, user, p) {
     need(String(b.password || '').length >= 8, 400, 'La contraseña debe tener al menos 8 caracteres');
     await env.DB.prepare("INSERT INTO admin_users (username, display_name, pass_hash, role, perms) VALUES (?, ?, ?, 'staff', ?)")
       .bind(username, String(b.name || username).slice(0, 60), await hashPassword(b.password), perms).run();
+    await audit(env, user, 'crear', 'admin_users', null, username);
     return json({ ok: true });
   }
   need(id, 400, 'Falta el usuario');
@@ -277,6 +296,7 @@ async function users(request, env, user, p) {
       stmts.push(env.DB.prepare('DELETE FROM admin_sessions WHERE user_id = ?').bind(id));
     }
     if (stmts.length) await env.DB.batch(stmts);
+    await audit(env, user, 'editar', 'admin_users', id, b.password ? 'permisos / contraseña' : 'permisos');
     return json({ ok: true });
   }
   if (m === 'DELETE') {
@@ -284,6 +304,7 @@ async function users(request, env, user, p) {
       env.DB.prepare('DELETE FROM admin_sessions WHERE user_id = ?').bind(id),
       env.DB.prepare("DELETE FROM admin_users WHERE id = ? AND role = 'staff'").bind(id),
     ]);
+    await audit(env, user, 'borrar', 'admin_users', id, '');
     return json({ ok: true });
   }
   return fail(405, 'Método no permitido');
@@ -304,7 +325,7 @@ function insertStmt(env, name, def, row) {
     const upd = cols.filter((c) => !def.upsert.includes(c));
     sql += ` ON CONFLICT(${def.upsert.join(', ')}) DO ${upd.length ? `UPDATE SET ${upd.map((c) => `${c} = excluded.${c}`).join(', ')}` : 'NOTHING'}`;
   }
-  return env.DB.prepare(`${sql} RETURNING *`).bind(...cols.map((c) => data[c]));
+  return env.DB.prepare(`${sql} RETURNING ${def.select || '*'}`).bind(...cols.map((c) => data[c]));
 }
 
 async function table(request, env, user, name, sub, url) {
@@ -322,6 +343,12 @@ async function table(request, env, user, name, sub, url) {
       where.push(`${col} = ?`);
       args.push(v);
     }
+    if (def.dateCol) {
+      const since = url.searchParams.get('since');
+      const until = url.searchParams.get('until');
+      if (since) { where.push(`${def.dateCol} >= ?`); args.push(since); }
+      if (until) { where.push(`${def.dateCol} <= ?`); args.push(until); }
+    }
     const limit = Math.min(Number(url.searchParams.get('limit')) || 5000, 5000);
     const { results } = await env.DB.prepare(
       `SELECT ${def.select || '*'} FROM ${name}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY ${name === 'assessments' ? 'created_at' : 'id'} DESC LIMIT ${limit}`
@@ -334,10 +361,14 @@ async function table(request, env, user, name, sub, url) {
     const rows = Array.isArray(b.rows) ? b.rows.slice(0, 500) : [];
     need(rows.length, 400, 'Sin datos');
     const res = await env.DB.batch(rows.map((r) => insertStmt(env, name, def, r)));
+    if (!def.quiet) await audit(env, user, 'crear', name, null, `${rows.length} registros`);
     return json(res.map((x) => x.results?.[0]));
   }
   if (m === 'POST' && !sub) {
-    const row = await insertStmt(env, name, def, await body(request)).first();
+    const data = await body(request);
+    if (name === 'attendance_log') { data.source = data.source || 'manual'; data.created_by = user.username; }
+    const row = await insertStmt(env, name, def, data).first();
+    if (!def.quiet) await audit(env, user, 'crear', name, row?.id, describeRow(row));
     return json(row);
   }
   need(sub && /^\d+$/.test(sub), 400, 'Falta el id');
@@ -345,13 +376,16 @@ async function table(request, env, user, name, sub, url) {
     const data = clean(def, await body(request));
     const cols = Object.keys(data);
     need(cols.length, 400, 'Sin cambios');
-    const row = await env.DB.prepare(`UPDATE ${name} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ? RETURNING *`)
+    const row = await env.DB.prepare(`UPDATE ${name} SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ? RETURNING ${def.select || '*'}`)
       .bind(...cols.map((c) => data[c]), Number(sub)).first();
     need(row, 404, 'No encontrado');
+    if (!def.quiet) await audit(env, user, 'editar', name, row.id, `${describeRow(row)} (${cols.join(', ')})`);
     return json(row);
   }
   if (m === 'DELETE') {
+    const old = await env.DB.prepare(`SELECT ${def.select || '*'} FROM ${name} WHERE id = ?`).bind(Number(sub)).first();
     await env.DB.prepare(`DELETE FROM ${name} WHERE id = ?`).bind(Number(sub)).run();
+    if (!def.quiet) await audit(env, user, 'borrar', name, sub, describeRow(old || {}));
     return json({ ok: true });
   }
   return fail(405, 'Método no permitido');

@@ -2,38 +2,32 @@ import { useMemo, useState } from 'react';
 import { Plus, Pencil, MessageCircle, Check } from 'lucide-react';
 import { useStore, useTable } from '../lib/store';
 import { db } from '../lib/backend';
-import { byId, money, today, waLink, firstName, fmtDate } from '../lib/people';
+import { money, today, waLink, firstName, fmtDate, addDays } from '../lib/people';
 import { Modal, PageHead, Text, Num, Seg, Kpi } from '../components/ui';
-import { toMin } from '../lib/time';
-
-const hoursOf = (s) => (s.start_time && s.end_time ? Math.max(0, (toMin(s.end_time) - toMin(s.start_time)) / 60) : 0);
 const monthLabel = (m) => new Date(`${m}-15T12:00:00`).toLocaleDateString('es-EC', { month: 'long', year: 'numeric' });
 
 export default function Teachers() {
   const { data, notify } = useStore();
   const people = useTable('people');
-  const groups = useTable('course_groups');
-  const sessions = useTable('class_sessions');
+  const logs = useTable('attendance_log', [], { since: addDays(today(), -200) });
   const payouts = useTable('teacher_payouts');
   const [month, setMonth] = useState(today().slice(0, 7));
   const [edit, setEdit] = useState(null);
-  const gById = byId(groups.rows);
   const teachers = (people.rows || []).filter((p) => p.person_type === 'teacher');
 
   const stats = useMemo(() => {
     const m = {};
-    for (const t of teachers) m[t.id] = { hours: 0, sessions: 0, noTime: 0, groups: (groups.rows || []).filter((g) => g.teacher_id === t.id && ['planned', 'active'].includes(g.status)) };
-    for (const s of sessions.rows || []) {
-      if (!String(s.session_date).startsWith(month)) continue;
-      const tid = s.teacher_id || gById[s.group_id]?.teacher_id;
-      if (!m[tid]) continue;
-      m[tid].sessions++;
-      const h = hoursOf(s);
-      m[tid].hours += h;
-      if (!h) m[tid].noTime++;
+    for (const t of teachers) m[t.id] = { hours: 0, sessions: 0, noTime: 0, days: new Set() };
+    for (const l of logs.rows || []) {
+      if (!String(l.day).startsWith(month) || !m[l.person_id]) continue;
+      const x = m[l.person_id];
+      x.sessions++;
+      x.days.add(l.day);
+      x.hours += (l.minutes || 0) / 60;
+      if (!l.check_out) x.noTime++;
     }
     return m;
-  }, [teachers, sessions.rows, groups.rows, month, gById]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teachers, logs.rows, month]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rate = (t) => t.hourly_rate ?? data.params.costoProfesorHora;
   const payoutOf = (t) => (payouts.rows || []).find((p) => p.teacher_id === t.id && p.period === month);
@@ -62,7 +56,7 @@ export default function Teachers() {
 
   return (
     <>
-      <PageHead title="Profesores" desc="Las horas salen de las clases registradas en Asistencia (con hora de inicio y fin).">
+      <PageHead title="Profesores" desc="Las horas salen de sus firmas de entrada y salida en el enlace de asistencia.">
         <button className="btn primary" onClick={() => setEdit({ full_name: '', phone: '', email: '', subjects: '', hourly_rate: data.params.costoProfesorHora, notes: '' })}><Plus size={16} /> Nuevo profesor</button>
       </PageHead>
       <div className="card" style={{ marginBottom: 14 }}>
@@ -75,7 +69,7 @@ export default function Teachers() {
       </div>
       <div className="grid g3">
         {teachers.map((t) => {
-          const st = stats[t.id] || { hours: 0, sessions: 0, noTime: 0, groups: [] };
+          const st = stats[t.id] || { hours: 0, sessions: 0, noTime: 0, days: new Set() };
           const po = payoutOf(t);
           return (
             <div key={t.id} className="card">
@@ -85,13 +79,12 @@ export default function Teachers() {
                 <button className="btn sm ghost icon" onClick={() => setEdit({ ...t })}><Pencil size={14} /></button>
               </div>
               <div className="small muted">{t.subjects || 'Materias sin indicar'} · {money(rate(t))}/h</div>
-              <div className="small" style={{ margin: '8px 0' }}>Grupos: {st.groups.map((g) => g.group_name).join(', ') || <span className="muted">ninguno</span>}</div>
-              <div className="row">
-                <div><div className="small muted">Clases</div><b>{st.sessions}</b></div>
+              <div className="row" style={{ marginTop: 10 }}>
+                <div><div className="small muted">Días</div><b>{st.days.size}</b></div>
                 <div><div className="small muted">Horas</div><b>{Math.round(st.hours * 10) / 10}</b></div>
                 <div><div className="small muted">A pagar</div><b>{money(st.hours * rate(t))}</b></div>
               </div>
-              {st.noTime > 0 && <div className="small" style={{ color: '#b45309', marginTop: 6 }}>{st.noTime} clase(s) sin hora de inicio/fin: no se cuentan.</div>}
+              {st.noTime > 0 && <div className="small" style={{ color: '#b45309', marginTop: 6 }}>{st.noTime} visita(s) sin salida registrada: no se cuentan. Corrígelas en Asistencia.</div>}
               <div style={{ marginTop: 10 }}>
                 {po ? <span className="chip tag-ok"><Check size={13} /> Pagado {money(po.amount)} el {fmtDate(po.paid_at)}</span>
                   : <button className="btn sm" disabled={!st.hours} onClick={() => pay(t)}>Registrar pago del mes</button>}
@@ -100,7 +93,7 @@ export default function Teachers() {
           );
         })}
       </div>
-      {!teachers.length && <div className="card empty">Agrega a tus profesores para asignarlos a grupos y calcular sus pagos.</div>}
+      {!teachers.length && <div className="card empty">Agrega a tus profesores: cuando firmen su entrada y salida, aquí verás sus horas y cuánto pagarles.</div>}
 
       {edit && (
         <Modal title={edit.id ? 'Editar profesor' : 'Nuevo profesor'} onClose={() => setEdit(null)}

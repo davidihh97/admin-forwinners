@@ -7,11 +7,14 @@ Panel privado en **admin.forwinnersec.com** para manejar For Winners y la págin
 | Inicio | Resumen: horas, ocupación, choques de horario, avance de los planes |
 | Horario, Espacios, Cursos y precios, Plan de clases, Simulador | Lo que antes estaba en el Excel `For_Winners_Carga_Horaria_y_Espacios_v2.xlsx`, con las mismas fórmulas (`src/lib/calc.js`) |
 | Interesados | Lo que llega desde la web (simuladores, diagnóstico, test vocacional, contacto) en un tablero Nuevo → Contactado → Inscrito → Cerrado |
-| Estudiantes, Grupos | Fichas, inscripción en grupos con cupo mínimo, cuotas automáticas |
+| Estudiantes | Fichas e inscripción directa a un curso, con descuento y cuotas automáticas |
 | Pagos y cuotas | Cobros, cuotas vencidas, recordatorio por WhatsApp |
-| Asistencia, Notas de simulacros | Lista por clase (con el tema del plan) y avance en simulacros |
-| Profesores | Horas dictadas por mes y pago |
-| Recordatorios | Mensajes de WhatsApp listos: cuotas, simulacros, clases de mañana, interesados sin contactar |
+| Asistencia | Estudiantes y profesores firman entrada y salida en `/firmar?k=…` (tablet en recepción o celular, con QR). El panel muestra quién está dentro, horas por persona y período, firmas, correcciones a mano y exportación a Excel |
+| Notas de simulacros | Avance de cada estudiante por curso |
+| Profesores | Horas del mes según sus firmas de asistencia y pago |
+| Finanzas | Gastos, cuotas cobradas, pagos a profesores y resultado de cada mes |
+| Actividad | Registro de todo lo que hace el equipo en el panel (solo el administrador) |
+| Recordatorios | Mensajes de WhatsApp listos: cuotas, estudiantes que no vienen hace una semana, salidas sin registrar, interesados sin contactar |
 | Editor de la web | La página real de forwinnersec.com: clic en un texto, botón o imagen para cambiarlo; formularios para WhatsApp, aviso, precios, preguntas frecuentes, testimonios, portada; secciones nuevas; Google |
 | Usuarios | Cuentas para el equipo con permisos por sección |
 
@@ -31,6 +34,8 @@ forwinnersec.com  (repositorio for-winners-website)
 - **Borrador y publicado**: lo que se edita en el Editor de la web solo llega a forwinnersec.com al pulsar **Publicar** (tarda hasta 30 segundos en verse).
 - **Seguridad**: contraseñas con PBKDF2, sesión en cookie `HttpOnly`/`Secure`/`SameSite=Strict`, límite de 10 intentos de ingreso cada 15 minutos, permisos revisados en el servidor en cada petición. La web pública solo lee el contenido publicado; precios de costo, márgenes, estudiantes y pagos nunca salen del panel.
 - **Historial**: cada documento guarda copias automáticas (Ajustes → Versiones anteriores) y hay Deshacer/Rehacer.
+- **Tablas nuevas automáticas**: asistencia, gastos y actividad se crean solas en D1 la primera vez que se usa el panel (`worker/extra.js`); no hace falta ejecutar SQL.
+- **Enlace de firma**: protegido por una clave que se puede cambiar en cualquier momento; límite de intentos por equipo; opción de pedir los 4 últimos dígitos del celular.
 
 ## Puesta en marcha (una sola vez)
 

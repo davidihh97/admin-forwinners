@@ -47,7 +47,7 @@ export default function Grades() {
 
   if (groups.error) return <div className="alert bad">{groups.error}</div>;
   if (!groups.rows || !people.rows) return <div className="empty">Cargando…</div>;
-  if (!list.length) return <><PageHead title="Notas de simulacros" /><div className="card empty">Primero crea un grupo en la sección Grupos.</div></>;
+  if (!list.length) return <><PageHead title="Notas de simulacros" /><div className="card empty">Primero inscribe estudiantes en un curso (Estudiantes → Inscribir).</div></>;
 
   return (
     <>
@@ -55,7 +55,7 @@ export default function Grades() {
         <button className="btn primary" onClick={() => setEntry({ name: `Simulacro ${exams.length + 1}`, date: today(), max: 100, values: {} })}><Plus size={16} /> Registrar notas</button>
       </PageHead>
       <div className="card" style={{ marginBottom: 14 }}>
-        <div style={{ maxWidth: 320 }}><Select label="Grupo" value={groupId} onChange={setGroupId} options={list.map((g) => ({ value: String(g.id), label: g.group_name }))} /></div>
+        <div style={{ maxWidth: 320 }}><Select label="Curso" value={groupId} onChange={setGroupId} options={list.map((g) => ({ value: String(g.id), label: g.group_name }))} /></div>
       </div>
       <div className="card table-wrap">
         <table className="t">
@@ -78,14 +78,14 @@ export default function Grades() {
             })}
             {exams.length > 0 && (
               <tr style={{ fontWeight: 700 }}>
-                <td>Promedio del grupo</td>
+                <td>Promedio del curso</td>
                 {exams.map((e) => { const rs = gScores.filter((x) => x.exam_name === e); return <td key={e} className="num">{rs.length ? Math.round(rs.reduce((a, r) => a + pct(r), 0) / rs.length) : '—'}</td>; })}
                 <td /><td />
               </tr>
             )}
           </tbody>
         </table>
-        {!students.length && <div className="empty">Este grupo aún no tiene estudiantes.</div>}
+        {!students.length && <div className="empty">Este curso aún no tiene estudiantes.</div>}
         {students.length > 0 && !exams.length && <div className="empty">Todavía no hay notas. Pulsa «Registrar notas» después del primer simulacro.</div>}
       </div>
 
