@@ -71,11 +71,11 @@ export default function Payments() {
           <Seg value={filter} onChange={setFilter} options={[{ value: 'pending', label: 'Pendientes' }, { value: 'late', label: 'Vencidas' }, { value: 'paid', label: 'Pagadas' }, { value: 'all', label: 'Todas' }]} />
           <div className="row grow" style={{ maxWidth: 340 }}>
             <Search size={16} className="muted" />
-            <input className="input grow" placeholder="Buscar estudiante o grupo…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="input grow" placeholder="Buscar estudiante o curso…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
         </div>
         <table className="t">
-          <thead><tr><th>Estudiante</th><th>Grupo</th><th className="num">Cuota</th><th className="num">Monto</th><th>Vence</th><th>Estado</th><th /></tr></thead>
+          <thead><tr><th>Estudiante</th><th>Curso</th><th className="num">Cuota</th><th className="num">Monto</th><th>Vence</th><th>Estado</th><th /></tr></thead>
           <tbody>
             {shown.map((p) => {
               const phone = p.student.phone || p.student.guardian_phone;
@@ -108,7 +108,7 @@ export default function Payments() {
           footer={<>{edit.id && <button className="btn danger" onClick={async () => { if (!confirm('¿Anular esta cuota?')) return; await save({ ...edit, status: 'void' }); }}>Anular</button>}<span className="grow" /><button className="btn" onClick={() => setEdit(null)}>Cancelar</button><button className="btn primary" disabled={!edit.enrollment_id || !edit.amount} onClick={() => save(edit)}>Guardar</button></>}>
           {!edit.id && (
             <Select label="Inscripción" value={String(edit.enrollment_id)} onChange={(v) => setEdit({ ...edit, enrollment_id: v })}
-              options={[{ value: '', label: 'Elige estudiante y grupo…' }, ...(enr.rows || []).filter((e) => e.status !== 'cancelled').map((e) => ({ value: String(e.id), label: `${pById[e.student_id]?.full_name} · ${gById[e.group_id]?.group_name}` }))]} />
+              options={[{ value: '', label: 'Elige estudiante y curso…' }, ...(enr.rows || []).filter((e) => e.status !== 'cancelled').map((e) => ({ value: String(e.id), label: `${pById[e.student_id]?.full_name} · ${gById[e.group_id]?.group_name}` }))]} />
           )}
           <div className="grid g2">
             <Num label="Monto ($)" value={edit.amount} onChange={(v) => setEdit({ ...edit, amount: v })} />

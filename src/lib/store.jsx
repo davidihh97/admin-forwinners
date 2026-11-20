@@ -125,18 +125,19 @@ export function StoreProvider({ children, session }) {
 }
 
 /** Carga una tabla de la base de datos y la mantiene en memoria. */
-export function useTable(name, deps = []) {
+export function useTable(name, deps = [], range) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
+  const key = JSON.stringify(range || {});
   const reload = useCallback(() => {
     backend.db
-      .list(name)
+      .list(name, {}, range || {})
       .then((r) => {
         setRows(r);
         setError(null);
       })
       .catch((e) => setError(e.message));
-  }, [name]);
+  }, [name, key]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(reload, [reload, ...deps]); // eslint-disable-line react-hooks/exhaustive-deps
   return { rows, error, reload, setRows };
 }

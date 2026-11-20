@@ -68,7 +68,7 @@ export default function Students() {
 
   return (
     <>
-      <PageHead title="Estudiantes" desc="Fichas, grupos, pagos, asistencia y notas de cada estudiante.">
+      <PageHead title="Estudiantes" desc="Fichas, cursos, pagos, horas de asistencia y notas de cada estudiante.">
         <button className="btn primary" onClick={() => setEnroll({})}><Plus size={16} /> Nuevo estudiante</button>
       </PageHead>
       <div className="grid g4 kpis" style={{ marginBottom: 14 }}>
@@ -86,7 +86,7 @@ export default function Students() {
           </div>
         </div>
         <table className="t">
-          <thead><tr><th>Estudiante</th><th>Grupos</th><th className="num">Asistencia</th><th className="num">Promedio</th><th className="num">Pagado</th><th className="num">Debe</th><th /></tr></thead>
+          <thead><tr><th>Estudiante</th><th>Cursos</th><th className="num">Asistencia</th><th className="num">Promedio</th><th className="num">Pagado</th><th className="num">Debe</th><th /></tr></thead>
           <tbody>
             {list.map((s) => {
               const x = info[s.id] || { enr: [], att: [0, 0], scores: [] };
@@ -133,7 +133,7 @@ export default function Students() {
 
       {detail && (
         <Modal title={detail.full_name} onClose={() => setDetail(null)} wide
-          footer={<><button className="btn" onClick={() => { setEdit({ ...detail }); setDetail(null); }}><Pencil size={14} /> Editar ficha</button><span className="grow" /><button className="btn primary" onClick={() => { setEnroll({ student: detail }); setDetail(null); }}><UserPlus size={15} /> Inscribir en un grupo</button></>}>
+          footer={<><button className="btn" onClick={() => { setEdit({ ...detail }); setDetail(null); }}><Pencil size={14} /> Editar ficha</button><span className="grow" /><button className="btn primary" onClick={() => { setEnroll({ student: detail }); setDetail(null); }}><UserPlus size={15} /> Inscribir en un curso</button></>}>
           <div className="row small muted">
             {detail.phone && <span>📱 {detail.phone}</span>}{detail.email && <span>✉️ {detail.email}</span>}{detail.school && <span>🏫 {detail.school}</span>}{detail.target && <span>🎯 {detail.target}</span>}
             {detail.guardian_name && <span>👪 {detail.guardian_name} {detail.guardian_phone}</span>}
@@ -145,7 +145,7 @@ export default function Students() {
             return (
               <div key={e.id} className="sub-card">
                 <div className="row">
-                  <b className="grow">{gById[e.group_id]?.group_name || 'Grupo'}</b>
+                  <b className="grow">{gById[e.group_id]?.group_name || 'Curso'}</b>
                   <span className={`chip ${STATUS_TAG[e.status]}`}>{STATUS.enrollment[e.status]}</span>
                   <span className="small">{money(e.agreed_price)}{e.discount ? ` (${e.discount})` : ''}</span>
                 </div>
@@ -176,7 +176,7 @@ export default function Students() {
         <EnrollDialog
           student={enroll.student}
           onClose={() => setEnroll(null)}
-          onDone={() => { setEnroll(null); people.reload(); enr.reload(); pays.reload(); }}
+          onDone={() => { setEnroll(null); people.reload(); enr.reload(); pays.reload(); groups.reload(); }}
         />
       )}
     </>

@@ -6,13 +6,14 @@ import { Modal, PageHead, Text, Check } from '../components/ui';
 
 export const MODULE_LABELS = {
   horario: 'Horario', espacios: 'Espacios', cursos: 'Cursos y precios', temas: 'Plan de clases', simulador: 'Simulador',
-  interesados: 'Interesados', estudiantes: 'Estudiantes', grupos: 'Grupos', pagos: 'Pagos y cuotas', asistencia: 'Asistencia',
+  interesados: 'Interesados', estudiantes: 'Estudiantes', pagos: 'Pagos y cuotas', finanzas: 'Finanzas (gastos y resumen)', asistencia: 'Asistencia',
   notas: 'Notas de simulacros', recordatorios: 'Recordatorios', profesores: 'Profesores', web: 'Editor de la web', ajustes: 'Ajustes (tarifas y categorías)',
 };
 const PRESETS = {
-  'Atención y secretaría': ['horario', 'espacios', 'temas', 'interesados', 'estudiantes', 'grupos', 'pagos', 'asistencia', 'notas', 'recordatorios'],
+  'Atención y secretaría': ['horario', 'espacios', 'temas', 'interesados', 'estudiantes', 'pagos', 'asistencia', 'notas', 'recordatorios'],
   'Solo académico': ['horario', 'temas', 'asistencia', 'notas'],
-  'Todo menos dinero': Object.keys(MODULE_LABELS).filter((m) => !['pagos', 'cursos', 'simulador', 'ajustes', 'profesores'].includes(m)),
+  'Solo asistencia': ['asistencia'],
+  'Todo menos dinero': Object.keys(MODULE_LABELS).filter((m) => !['pagos', 'cursos', 'simulador', 'ajustes', 'profesores', 'finanzas'].includes(m)),
 };
 
 export default function Users() {

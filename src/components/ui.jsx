@@ -103,13 +103,14 @@ export function Bar({ parts, max = 1 }) {
   );
 }
 
-export function Kpi({ label, value, sub }) {
+export function Kpi({ label, value, sub, icon: Icon, tone, onClick }) {
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div className="card kpi">
-      <div className="l">{label}</div>
-      <div className="v mono">{value}</div>
-      {sub && <div className="small muted">{sub}</div>}
-    </div>
+    <Tag className={`card kpi ${tone ? `tone-${tone}` : ''} ${onClick ? 'clickable' : ''}`} onClick={onClick} type={onClick ? 'button' : undefined}>
+      <div className="l">{Icon && <span className="ki"><Icon size={15} /></span>}{label}</div>
+      <div className="v">{value}</div>
+      {sub && <div className="small">{sub}</div>}
+    </Tag>
   );
 }
 

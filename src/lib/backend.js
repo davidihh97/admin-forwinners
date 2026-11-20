@@ -51,8 +51,11 @@ export const historyItem = (id) => api.get(`history/item/${id}`);
 
 /** Tablas de gestión (estudiantes, pagos, etc.) */
 export const db = {
-  list: (t, filters = {}) =>
-    api.get(`t/${t}?${new URLSearchParams(Object.entries(filters).map(([k, v]) => [`f_${k}`, v]))}`),
+  list: (t, filters = {}, range = {}) =>
+    api.get(`t/${t}?${new URLSearchParams([
+      ...Object.entries(filters).map(([k, v]) => [`f_${k}`, v]),
+      ...Object.entries(range).filter(([, v]) => v),
+    ])}`),
   add: (t, row) => api.post(`t/${t}`, row),
   addMany: (t, rows) => api.post(`t/${t}/bulk`, { rows }),
   update: (t, id, row) => api.patch(`t/${t}/${id}`, row),
@@ -76,3 +79,6 @@ export async function uploadImage(file) {
   const { url } = await call('POST', 'media', undefined, blob);
   return url;
 }
+
+export const signatures = (id) => api.get(`attendance/${id}/signatures`);
+export const summary = () => api.get('summary');

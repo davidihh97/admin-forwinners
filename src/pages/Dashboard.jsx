@@ -1,13 +1,17 @@
-import { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, UserCheck, Wallet, Inbox, Users, ChevronRight, Clock, CalendarClock } from 'lucide-react';
 import { useStore } from '../lib/store';
+import { summary as loadSummary } from '../lib/backend';
+import { money } from '../lib/people';
 import { spaceStats, findConflicts, categoryHours, allCourses } from '../lib/calc';
 import { DAYS, todayName, toMin, fmtH, fmtPct, pretty } from '../lib/time';
 import { Kpi, PageHead, Bar, occTag } from '../components/ui';
 
 export default function Dashboard({ go }) {
-  const { data } = useStore();
+  const { data, user } = useStore();
   const [day, setDay] = useState(todayName());
+  const [sum, setSum] = useState(null);
+  useEffect(() => { loadSummary().then(setSum).catch(() => setSum({})); }, []);
   const stats = useMemo(() => spaceStats(data), [data]);
   const conflicts = useMemo(() => findConflicts(data), [data]);
   const catH = useMemo(() => categoryHours(data), [data]);
@@ -28,8 +32,11 @@ export default function Dashboard({ go }) {
 
   return (
     <>
-      <PageHead title="Inicio" desc="Resumen de For Winners: espacios, horario y avance de los cursos." />
+      <PageHead title={`${greeting()}, ${user.name.split(' ')[0]}`} desc={new Date().toLocaleDateString('es-EC', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} />
 
+      {sum && <Today sum={sum} go={go} />}
+
+      <div className="section-title">Horario y espacios</div>
       <div className="grid g4 kpis">
         <Kpi label="Horas de clase por semana" value={fmtH(totalH)} sub={`${data.schedule.length} bloques en el horario`} />
         <Kpi label="Ocupación promedio" value={fmtPct(avgOcc)} sub={`${data.spaces.length} espacios`} />
@@ -132,6 +139,44 @@ export default function Dashboard({ go }) {
             </div>
           ))}
         </div>
+      </div>
+    </>
+  );
+}
+
+const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches'; };
+
+/** Lo que necesita atención hoy (según los permisos de cada usuario). */
+function Today({ sum, go }) {
+  const tiles = [];
+  if (sum.inside != null) tiles.push({ icon: UserCheck, label: 'Dentro ahora', value: sum.inside, sub: `${sum.todayVisits} asistieron hoy`, page: 'asistencia', tone: 'ok' });
+  if (sum.monthHours != null) tiles.push({ icon: Clock, label: 'Horas de estudiantes este mes', value: `${sum.monthHours} h`, page: 'asistencia' });
+  if (sum.collectedMonth != null) tiles.push({ icon: Wallet, label: 'Cobrado este mes', value: money(sum.collectedMonth), sub: sum.expensesMonth != null ? `Gastos ${money(sum.expensesMonth)}` : `Vence en 7 días: ${money(sum.dueWeek)}`, page: 'pagos' });
+  if (sum.students != null) tiles.push({ icon: Users, label: 'Estudiantes activos', value: sum.students, page: 'estudiantes' });
+  const alerts = [];
+  if (sum.overdue?.n) alerts.push({ tone: 'bad', text: `${sum.overdue.n} cuota${sum.overdue.n > 1 ? 's' : ''} vencida${sum.overdue.n > 1 ? 's' : ''} por ${money(sum.overdue.amount)}`, page: 'pagos' });
+  if (sum.newLeads) alerts.push({ tone: 'info', text: `${sum.newLeads} interesado${sum.newLeads > 1 ? 's' : ''} nuevo${sum.newLeads > 1 ? 's' : ''} sin contactar`, page: 'interesados' });
+  if (sum.absent7) alerts.push({ tone: 'warn', text: `${sum.absent7} estudiante${sum.absent7 > 1 ? 's' : ''} inscrito${sum.absent7 > 1 ? 's' : ''} no viene${sum.absent7 > 1 ? 'n' : ''} hace una semana`, page: 'recordatorios' });
+  if (sum.forgotten) alerts.push({ tone: 'warn', text: `${sum.forgotten} salida${sum.forgotten > 1 ? 's' : ''} sin registrar de días anteriores`, page: 'asistencia' });
+  if (!tiles.length && !alerts.length) return null;
+  return (
+    <>
+      {tiles.length > 0 && (
+        <div className="grid g4 kpis" style={{ marginBottom: 16 }}>
+          {tiles.map((t) => <Kpi key={t.label} {...t} onClick={() => go(t.page)} />)}
+        </div>
+      )}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div className="card-h"><CalendarClock size={18} /><h2 className="grow">Pendientes de hoy</h2></div>
+        {alerts.length ? (
+          <div className="list">
+            {alerts.map((a) => (
+              <button key={a.text} className="list-row clickable" onClick={() => go(a.page)}>
+                <span className={`dot tone-${a.tone}`} /><span className="grow">{a.text}</span><ChevronRight size={16} className="muted" />
+              </button>
+            ))}
+          </div>
+        ) : <div className="row muted"><CheckCircle2 size={18} color="var(--ok)" /> Todo al día. No hay pendientes.</div>}
       </div>
     </>
   );

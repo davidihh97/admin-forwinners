@@ -2,7 +2,7 @@
 
 export const MODULES = [
   'horario', 'espacios', 'cursos', 'temas', 'simulador', 'ajustes', 'web',
-  'interesados', 'estudiantes', 'grupos', 'pagos', 'profesores', 'asistencia', 'notas', 'recordatorios',
+  'interesados', 'estudiantes', 'grupos', 'pagos', 'profesores', 'asistencia', 'notas', 'recordatorios', 'finanzas',
 ];
 
 // Documento 'operations': qué módulo permite cambiar cada parte.
@@ -23,6 +23,7 @@ export const CONTENT = {
   operations: { read: null, write: 'ops' }, // null = cualquier usuario del panel
   site_draft: { read: ['web'], write: ['web'] },
   site_published: { read: ['web'], write: ['web'] },
+  kiosk: { read: ['asistencia'], write: ['asistencia'] },
 };
 
 const P = (...cols) => cols;
@@ -35,13 +36,15 @@ export const TABLES = {
   },
   courses: {
     cols: P('name', 'category', 'description', 'modality', 'price', 'status', 'course_key'),
-    read: ['grupos', 'estudiantes', 'pagos'],
-    write: ['grupos'],
+    read: ['grupos', 'estudiantes', 'pagos', 'notas', 'interesados', 'recordatorios'],
+    write: ['grupos', 'estudiantes', 'interesados'],
+    quiet: true,
   },
   course_groups: {
     cols: P('course_id', 'teacher_id', 'group_name', 'start_date', 'end_date', 'capacity', 'status', 'schedule_note', 'plan_id'),
-    read: ['grupos', 'estudiantes', 'pagos', 'asistencia', 'notas', 'profesores', 'recordatorios'],
-    write: ['grupos'],
+    read: ['grupos', 'estudiantes', 'pagos', 'asistencia', 'notas', 'profesores', 'recordatorios', 'interesados'],
+    write: ['grupos', 'estudiantes', 'interesados'],
+    quiet: true,
   },
   enrollments: {
     cols: P('student_id', 'group_id', 'status', 'agreed_price', 'installments', 'discount', 'notes'),
@@ -50,7 +53,7 @@ export const TABLES = {
   },
   payments: {
     cols: P('enrollment_id', 'amount', 'payment_date', 'payment_method', 'reference', 'status', 'notes', 'due_date', 'installment_no'),
-    read: ['pagos', 'estudiantes', 'recordatorios'],
+    read: ['pagos', 'estudiantes', 'recordatorios', 'finanzas'],
     write: ['pagos', 'estudiantes', 'interesados'],
   },
   class_sessions: {
@@ -80,9 +83,28 @@ export const TABLES = {
     read: ['interesados'],
     write: [],
   },
+  attendance_log: {
+    cols: P('person_id', 'person_name', 'person_type', 'day', 'check_in', 'check_out', 'minutes', 'notes', 'source', 'created_by'),
+    select: 'id, person_id, person_name, person_type, day, check_in, check_out, minutes, source, notes, created_by, (sign_in IS NOT NULL) AS has_sign_in, (sign_out IS NOT NULL) AS has_sign_out',
+    read: ['asistencia', 'estudiantes', 'profesores', 'recordatorios'],
+    write: ['asistencia'],
+    dateCol: 'day',
+  },
+  expenses: {
+    cols: P('date', 'category', 'description', 'amount', 'method', 'notes'),
+    read: ['finanzas'],
+    write: ['finanzas'],
+    dateCol: 'date',
+  },
+  audit_log: {
+    cols: P(),
+    read: [], // solo el administrador
+    write: [],
+    dateCol: 'at',
+  },
   teacher_payouts: {
     cols: P('teacher_id', 'period', 'hours', 'amount', 'paid_at', 'notes'),
-    read: ['profesores'],
+    read: ['profesores', 'finanzas'],
     write: ['profesores'],
     upsert: ['teacher_id', 'period'],
   },
