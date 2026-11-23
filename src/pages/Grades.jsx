@@ -17,8 +17,10 @@ export default function Grades() {
   const [groupId, setGroupId] = useState('');
   const [entry, setEntry] = useState(null);
   const pById = byId(people.rows);
-  const list = (groups.rows || []).filter((g) => g.status !== 'cancelled');
-  useEffect(() => { if (!groupId && list[0]) setGroupId(String(list[0].id)); }, [list.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Cursos con sus estudiantes activos; se abre primero el que tiene más.
+  const activeIn = (gid) => (enr.rows || []).filter((e) => e.group_id === gid && e.status !== 'cancelled').length;
+  const list = (groups.rows || []).filter((g) => g.status !== 'cancelled').sort((a, b) => activeIn(b.id) - activeIn(a.id));
+  useEffect(() => { if (!groupId && list[0] && enr.rows) setGroupId(String(list[0].id)); }, [list.length, enr.rows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const students = (enr.rows || []).filter((e) => String(e.group_id) === groupId && e.status !== 'cancelled').map((e) => pById[e.student_id]).filter(Boolean)
     .sort((a, b) => a.full_name.localeCompare(b.full_name));
@@ -52,10 +54,10 @@ export default function Grades() {
   return (
     <>
       <PageHead title="Notas de simulacros" desc="Registra cada simulacro o prueba y mira cómo avanza cada estudiante.">
-        <button className="btn primary" onClick={() => setEntry({ name: `Simulacro ${exams.length + 1}`, date: today(), max: 100, values: {} })}><Plus size={16} /> Registrar notas</button>
+        <button className="btn primary" disabled={!groupId || !activeIn(Number(groupId))} title={groupId && !activeIn(Number(groupId)) ? 'Este curso no tiene estudiantes activos' : undefined} onClick={() => setEntry({ name: `Simulacro ${exams.length + 1}`, date: today(), max: 100, values: {} })}><Plus size={16} /> Registrar notas</button>
       </PageHead>
       <div className="card" style={{ marginBottom: 14 }}>
-        <div style={{ maxWidth: 320 }}><Select label="Curso" value={groupId} onChange={setGroupId} options={list.map((g) => ({ value: String(g.id), label: g.group_name }))} /></div>
+        <div style={{ maxWidth: 320 }}><Select label="Curso" value={groupId} onChange={setGroupId} options={list.map((g) => ({ value: String(g.id), label: `${g.group_name} (${activeIn(g.id)} estudiante${activeIn(g.id) === 1 ? '' : 's'})` }))} /></div>
       </div>
       <div className="card table-wrap">
         <table className="t">

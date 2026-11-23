@@ -48,6 +48,11 @@ export default function Schedule() {
     setDragId(null);
     if (!b) return;
     const dur = toMin(b.end) - toMin(b.start);
+    const [o, cl] = openHours(p, col.day);
+    if (m < toMin(o) || m + dur > toMin(cl)) {
+      notify(`Fuera del horario de atención del ${col.day.toLowerCase()} (${o}–${cl})`, 'bad');
+      return;
+    }
     ops.update((d) => {
       const x = d.schedule.find((y) => y.id === b.id);
       x.day = col.day;

@@ -225,6 +225,11 @@ async function kioskInner(request, env, url) {
     });
   }
 
+  // El QR de una clase solo sirve mientras su registro está abierto: después no deja ver nombres ni probar dígitos.
+  if (cls && p !== '/api/kiosk/info' && classState(cls, now) !== 'open') {
+    fail(409, classState(cls, now) === 'early' ? `El registro de esta clase se abre a las ${hmOf(cls.opens_at)}.` : 'El registro de esta clase ya se cerró. Avisa al profesor.');
+  }
+
   if (p === '/api/kiosk/search') {
     if (await bump(env, `kiosk-search:${ipOf(request)}`, 3600) > 600) fail(429, 'Demasiadas búsquedas. Intenta en un rato.');
     const qq = norm(q.q);
