@@ -1,7 +1,7 @@
 // Servidor del panel (admin.forwinnersec.com): sirve la aplicación y su API.
 // Usa la misma base D1 que forwinnersec.com.
 import { MODULES, OPS_KEYS, CONTENT, TABLES } from './schema.js';
-import { ensureSchema, kiosk, audit, describeRow, entityName, summary } from './extra.js';
+import { ensureSchema, kiosk, audit, describeRow, summary, kioskConfig, classWindow, localDay } from './extra.js';
 
 const COOKIE = 'fw_admin';
 const SESSION_DAYS = 30;
@@ -367,6 +367,19 @@ async function table(request, env, user, name, sub, url) {
   if (m === 'POST' && !sub) {
     const data = await body(request);
     if (name === 'attendance_log') { data.source = data.source || 'manual'; data.created_by = user.username; }
+    if (name === 'attendance_class') {
+      // La clave del QR y la ventana para registrarse las pone el servidor.
+      need(/^\d\d:\d\d$/.test(data.start_time || '') && /^\d\d:\d\d$/.test(data.end_time || '') && data.start_time < data.end_time, 400, 'Revisa la hora de inicio y fin de la clase');
+      need(data.subject, 400, 'Elige la materia');
+      const t = data.teacher_id && await env.DB.prepare("SELECT full_name FROM people WHERE id = ? AND person_type = 'teacher'").bind(Number(data.teacher_id)).first();
+      need(t, 400, 'Elige al profesor');
+      data.teacher_name = t.full_name;
+      data.day = data.day || localDay();
+      data.code = Array.from(crypto.getRandomValues(new Uint8Array(12)), (x) => 'abcdefghjkmnpqrstuvwxyz23456789'[x % 31]).join('');
+      Object.assign(data, classWindow(await kioskConfig(env), data.day, data.start_time, data.end_time));
+      data.status = 'open';
+      data.created_by = user.username;
+    }
     const row = await insertStmt(env, name, def, data).first();
     if (!def.quiet) await audit(env, user, 'crear', name, row?.id, describeRow(row));
     return json(row);

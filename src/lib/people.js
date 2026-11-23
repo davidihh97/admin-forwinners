@@ -95,10 +95,94 @@ export const dur = (min) => {
   return h ? `${h} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
 };
 export const hoursNum = (min) => Math.round(((min || 0) / 60) * 10) / 10;
-export const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' }) : '—');
+export const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', timeZone: TZ }) : '—');
 export const minutesBetween = (a, b) => Math.max(0, Math.round((new Date(b) - new Date(a)) / 60000));
 export const startOfWeek = (iso = today()) => {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
   return d.toLocaleDateString('en-CA');
 };
+
+/* ---------- horas en Ecuador ---------- */
+export const hmOf = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: TZ }) : '');
+export const isoAt = (day, hm) => (day && hm ? new Date(`${day}T${hm}:00-05:00`).toISOString() : null);
+export const hmToMin = (hm) => { const [h, m] = String(hm || '0:0').split(':').map(Number); return h * 60 + m; };
+export const minToHm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.round(m % 60)).padStart(2, '0')}`;
+export const nowHm = () => hmOf(new Date().toISOString());
+
+/**
+ * Clases dictadas por cada profesor: junta (sin contar dos veces) los horarios de los estudiantes
+ * que registraron clase con él, más sus registros propios y sus clases grupales.
+ */
+export function teacherBlocks(logs = [], classes = []) {
+  const per = {};
+  const add = (tid, name, day, s, e, info) => {
+    if (!tid || e <= s) return;
+    const k = `${tid}|${day}`;
+    (per[k] ||= { teacherId: tid, name, day, items: [] }).items.push({ s, e, ...info });
+  };
+  for (const l of logs) {
+    if (!l.check_out) continue;
+    const s = hmToMin(hmOf(l.check_in));
+    const e = hmToMin(hmOf(l.check_out));
+    if (l.person_type === 'teacher') add(l.person_id, l.person_name, l.day, s, e, { subject: l.subject, topic: l.topic });
+    else if (l.teacher_id) add(l.teacher_id, l.teacher_name, l.day, s, e, { subject: l.subject, topic: l.topic, student: l.person_id || l.person_name });
+  }
+  for (const c of classes) add(c.teacher_id, c.teacher_name, c.day, hmToMin(c.start_time), hmToMin(c.end_time), { subject: c.subject, topic: c.topic });
+  const out = [];
+  for (const g of Object.values(per)) {
+    const items = g.items.sort((a, b) => a.s - b.s);
+    let cur = null;
+    for (const it of items) {
+      if (cur && it.s <= cur.e) {
+        cur.e = Math.max(cur.e, it.e);
+      } else {
+        cur = { teacherId: g.teacherId, name: g.name, day: g.day, s: it.s, e: it.e, subjects: new Set(), topics: new Set(), students: new Set() };
+        out.push(cur);
+      }
+      if (it.subject) cur.subjects.add(it.subject);
+      if (it.topic) cur.topics.add(it.topic);
+      if (it.student) cur.students.add(it.student);
+    }
+  }
+  return out.map((b) => ({ ...b, minutes: b.e - b.s, start: minToHm(b.s), end: minToHm(b.e) }));
+}
+
+/** Alertas para revisar registros de estudiantes que pueden estar mal (o ser trampa). */
+export function attendanceFlags(logs = [], classes = []) {
+  const flags = {};
+  const add = (id, msg) => { (flags[id] ||= []).push(msg); };
+  const med = (arr) => { const a = [...arr].sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  const groups = {};
+  for (const l of logs) {
+    if (l.person_type !== 'student') continue;
+    if (!l.check_out) { add(l.id, 'No tiene hora de salida'); continue; }
+    if (l.source === 'kiosk' && l.teacher_id && l.subject) (groups[`${l.day}|${l.teacher_id}|${l.subject}`] ||= []).push(l);
+    if (l.source === 'kiosk' && l.created_at) {
+      const late = Math.round((new Date(`${String(l.created_at).replace(' ', 'T')}Z`) - new Date(l.check_out)) / 60000);
+      if (late > 45) add(l.id, `Se registró ${late} min después de la hora de salida`);
+    }
+    if (l.source === 'kiosk' && l.teacher_id) {
+      for (const c of classes) {
+        if (c.day !== l.day || c.teacher_id !== l.teacher_id) continue;
+        const s = hmToMin(hmOf(l.check_in));
+        const e = hmToMin(hmOf(l.check_out));
+        if (s < hmToMin(c.end_time) && e > hmToMin(c.start_time) && (s < hmToMin(c.start_time) - 10 || e > hmToMin(c.end_time) + 10))
+          add(l.id, `El profesor tuvo clase grupal de ${c.start_time} a ${c.end_time}`);
+      }
+    }
+  }
+  // Mismo profesor, materia y día: quien pone horas muy distintas a las de sus compañeros.
+  for (const list of Object.values(groups)) {
+    if (list.length < 3) continue;
+    const ms = med(list.map((l) => hmToMin(hmOf(l.check_in))));
+    const me = med(list.map((l) => hmToMin(hmOf(l.check_out))));
+    for (const l of list) {
+      const s = hmToMin(hmOf(l.check_in));
+      const e = hmToMin(hmOf(l.check_out));
+      if (Math.abs(s - ms) > 20 || Math.abs(e - me) > 20) add(l.id, `Sus compañeros registraron ${minToHm(ms)}–${minToHm(me)}`);
+    }
+  }
+  for (const l of logs) if (l.reviewed) delete flags[l.id];
+  return flags;
+}
