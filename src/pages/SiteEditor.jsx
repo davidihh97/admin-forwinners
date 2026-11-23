@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Send, Monitor, Smartphone, ExternalLink, MousePointerClick, Phone, Megaphone, LayoutGrid, Ruler,
   School, BookMarked, HelpCircle, Quote, Search, PlusSquare, Trash2, ArrowUp, ArrowDown, ArrowLeft,
-  ArrowRight, EyeOff, Eye, RotateCcw, ImageUp, Copy, AlertTriangle, ChevronLeft, History,
+  ArrowRight, EyeOff, Eye, RotateCcw, ImageUp, Copy, AlertTriangle, ChevronLeft, History, Palette, Paintbrush,
 } from 'lucide-react';
+import StylePanel from '../components/StylePanel';
+import { describeChanges } from '../site/changes';
+import { Modal } from '../components/ui';
 import { useStore } from '../lib/store';
 import * as backend from '../lib/backend';
 import { buildPublished, publicSnapshot, stable, stripPub } from '../site/publish';
@@ -12,6 +15,8 @@ import { uid } from '../lib/time';
 import { Text, Select, Seg, Check, Field } from '../components/ui';
 
 const PANELS = [
+  { id: 'historial', label: 'Historial de versiones', icon: History },
+  { id: 'tema', label: 'Colores y letras de toda la web', icon: Palette },
   { id: 'contacto', label: 'WhatsApp y contacto', icon: Phone },
   { id: 'aviso', label: 'Barra de aviso', icon: Megaphone },
   { id: 'portada', label: 'Portada: servicios y fotos', icon: LayoutGrid },
@@ -24,10 +29,11 @@ const PANELS = [
   { id: 'seo', label: 'Cómo aparece en Google', icon: Search },
 ];
 // Partes que main.js lee al cargar: si cambian, la vista previa se recarga.
-const LIVE_KEYS = ['overrides', 'sections'];
+const LIVE_KEYS = ['overrides', 'sections', 'theme'];
 
 export default function SiteEditor() {
   const { site, data, notify, siteUrl, user } = useStore();
+  const [pubDlg, setPubDlg] = useState(null); // { changes, note }
   const s = site.doc;
   const [page, setPage] = useState('index.html');
   const [device, setDevice] = useState('desktop');
@@ -102,13 +108,19 @@ export default function SiteEditor() {
     lastSent.current = null;
   };
 
-  const dirty = published !== undefined && stable(s) !== stable(stripPub(published));
-  async function publish() {
+  const dirty = published !== undefined && stable(stripPub(s)) !== stable(stripPub(published));
+  async function publish(note, value = s, changes) {
     setBusy(true);
     try {
-      const p = buildPublished(s, data);
+      const p = {
+        ...buildPublished(stripPub(value), data),
+        changeNote: String(note || '').slice(0, 300),
+        changes: (changes || describeChanges(stripPub(published), value)).slice(0, 60),
+        publishedBy: user.name,
+      };
       await backend.saveDoc('site_published', p);
       setPublished(p);
+      setPubDlg(null);
       notify('Publicado. En menos de un minuto se ve en forwinnersec.com');
     } catch (e) {
       notify(`No se pudo publicar: ${e.message}`, 'bad');
@@ -135,7 +147,8 @@ export default function SiteEditor() {
         </div>
         {published?.publishedAt && <span className="small muted">Publicado: {new Date(published.publishedAt).toLocaleString('es-EC')}</span>}
         {dirty && <button className="btn ghost" onClick={discard}><History size={15} /> Descartar cambios</button>}
-        <button className="btn accent" onClick={publish} disabled={busy || !dirty}>
+        <button className="btn ghost" onClick={() => setSel({ kind: 'panel', id: 'historial' })}><History size={15} /> Historial</button>
+        <button className="btn accent" onClick={() => setPubDlg({ changes: describeChanges(stripPub(published), s), note: '' })} disabled={busy || !dirty}>
           <Send size={16} /> {busy ? 'Publicando…' : dirty ? 'Publicar cambios' : 'Todo publicado'}
         </button>
       </div>
@@ -159,7 +172,12 @@ export default function SiteEditor() {
         <div className="dz-panel">
           {sel?.kind === 'el' && <ElementPanel key={sel.pick.sel} pick={sel.pick} page={page} site={s} upd={upd} onBack={() => setSel(null)} />}
           {sel?.kind === 'section' && <SectionPanel id={sel.id} site={s} data={data} upd={upd} onBack={() => setSel(null)} onScroll={(id) => frame.current?.contentWindow?.postMessage({ fwScrollTo: id }, origin)} />}
-          {sel?.kind === 'panel' && <DataPanel id={sel.id} page={page} site={s} data={data} upd={upd} user={user} onBack={() => setSel(null)} onPick={(x) => setSel(x)} />}
+          {sel?.kind === 'panel' && sel.id === 'historial' && (
+            <HistoryPanel published={published} onBack={() => setSel(null)}
+              onDraft={(v) => { site.replace(stripPub(v)); lastSent.current = null; setTimeout(() => send('reload'), 100); notify('Versión cargada en el borrador. Revísala y pulsa Publicar.'); }}
+              onPublish={(v, when) => publish(`Se volvió a la versión del ${when}`, stripPub(v), [`Restaurada la versión del ${when}`]).then(() => { site.replace(stripPub(v)); lastSent.current = null; setTimeout(() => send('reload'), 100); })} />
+          )}
+          {sel?.kind === 'panel' && sel.id !== 'historial' && <DataPanel id={sel.id} page={page} site={s} data={data} upd={upd} user={user} onBack={() => setSel(null)} onPick={(x) => setSel(x)} />}
           {!sel && (
             <>
               <div className="ph"><MousePointerClick size={16} /> ¿Qué quieres cambiar?</div>
@@ -191,6 +209,74 @@ export default function SiteEditor() {
             </>
           )}
         </div>
+      </div>
+
+      {pubDlg && (
+        <Modal title="Publicar cambios" onClose={() => setPubDlg(null)}
+          footer={<><button className="btn" onClick={() => setPubDlg(null)}>Cancelar</button><button className="btn accent" disabled={busy} onClick={() => publish(pubDlg.note, s, pubDlg.changes)}><Send size={15} /> {busy ? 'Publicando…' : 'Publicar'}</button></>}>
+          <p className="small muted" style={{ margin: 0 }}>Esto queda guardado en el <b>Historial de versiones</b>; desde ahí puedes volver atrás cuando quieras.</p>
+          <div className="sub-card">
+            <b className="small">Qué cambia ({pubDlg.changes.length})</b>
+            <ul className="small" style={{ margin: 0, paddingLeft: 18, maxHeight: 220, overflow: 'auto' }}>
+              {pubDlg.changes.map((c, i) => <li key={i}>{c}</li>)}
+              {!pubDlg.changes.length && <li>Cambios menores</li>}
+            </ul>
+          </div>
+          <Text label="Descripción (opcional)" placeholder="Ej.: precios de enero y nuevo aviso" value={pubDlg.note} onChange={(v) => setPubDlg({ ...pubDlg, note: v })} />
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function HistoryPanel({ published, onBack, onDraft, onPublish }) {
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const { notify } = useStore();
+  useEffect(() => { backend.history('site_published').then(setList).catch((e) => { notify(e.message, 'bad'); setList([]); }); }, [published]); // eslint-disable-line react-hooks/exhaustive-deps
+  const when = (iso) => (iso ? new Date(iso).toLocaleString('es-EC', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+  const parse = (c) => { try { return Array.isArray(c) ? c : JSON.parse(c || '[]'); } catch { return []; } };
+  const rows = [
+    ...(published ? [{ id: 'actual', current: true, note: published.changeNote, changes: published.changes, published_at: published.publishedAt, published_by: published.publishedBy }] : []),
+    ...(list || []),
+  ];
+  async function load(r, then) {
+    setBusy(r.id);
+    try {
+      const v = r.current ? published : await backend.historyItem(r.id);
+      await then(v, when(r.published_at || `${String(r.saved_at).replace(' ', 'T')}Z`));
+    } catch (e) { notify(e.message, 'bad'); } finally { setBusy(null); }
+  }
+  return (
+    <>
+      <Back onBack={onBack}>Historial de versiones</Back>
+      <div className="pb">
+        <p className="small muted" style={{ margin: 0 }}>Cada vez que publicas se guarda una versión. Si algo sale mal, vuelve a una anterior.</p>
+        {!list && <div className="small muted">Cargando…</div>}
+        {rows.map((r) => {
+          const ch = parse(r.changes);
+          return (
+            <div key={r.id} className="sub-card">
+              <div className="row">
+                <b className="grow">{when(r.published_at || (r.saved_at && `${String(r.saved_at).replace(' ', 'T')}Z`)) || 'Versión'}</b>
+                {r.current && <span className="chip tag-ok">En la web</span>}
+              </div>
+              <div className="small muted">{r.published_by || r.saved_by || ''}{r.note ? ` · ${r.note}` : ''}</div>
+              {ch.length > 0 && (
+                <details className="small"><summary>{ch.length} cambio{ch.length > 1 ? 's' : ''}</summary>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{ch.map((c, i) => <li key={i}>{c}</li>)}</ul>
+                </details>
+              )}
+              {!r.current && (
+                <div className="row">
+                  <button className="btn sm" disabled={!!busy} onClick={() => load(r, (v) => onDraft(v))}>Abrir en el editor</button>
+                  <button className="btn sm danger" disabled={!!busy} onClick={() => confirm('¿Publicar de inmediato esta versión? La web volverá a verse como en esa fecha.') && load(r, onPublish)}><RotateCcw size={13} /> Volver a esta versión</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {list && rows.length === 0 && <div className="small muted">Aún no hay publicaciones.</div>}
       </div>
     </>
   );
@@ -273,7 +359,7 @@ function ElementPanel({ pick, page, site, upd, onBack }) {
       let cur = arr.find((x) => x.sel === pick.sel);
       if (!cur) arr.push((cur = { sel: pick.sel, orig: pick.orig }));
       Object.assign(cur, patch);
-      for (const k of Object.keys(cur)) if (cur[k] === '' || cur[k] === undefined || cur[k] === false) delete cur[k];
+      for (const k of Object.keys(cur)) if (cur[k] === '' || cur[k] === undefined || cur[k] === false || (k === 'style' && !Object.keys(cur[k] || {}).length)) delete cur[k];
       if (Object.keys(cur).length <= 2) d.overrides[page] = arr.filter((x) => x !== cur);
     });
   const isLink = pick.tag === 'a';
@@ -289,12 +375,22 @@ function ElementPanel({ pick, page, site, upd, onBack }) {
             hint="Escribe *así* para cursiva o color de acento, **así** para negrita. Enter = salto de línea." />
         )}
         {!pick.textEditable && !isImg && <div className="alert info small">Este bloque tiene varias partes. Haz clic en el texto exacto que quieres cambiar.</div>}
-        {isLink && (
+        {isLink && pick.isWa && <div className="alert info small">Este botón abre WhatsApp. El número y el mensaje se cambian en «WhatsApp y contacto».</div>}
+        {isLink && !pick.isWa && (
           <Text label="¿A dónde lleva?" value={o.href ?? pick.href ?? ''} onChange={(v) => set({ href: v === pick.href ? '' : v })}
             hint="Otra página (contacto.html), una parte (#fechas) o un enlace (https://…)" />
         )}
         {isImg && <ImageInput label="Imagen" value={o.src ?? pick.src} onChange={(v) => set({ src: v === pick.src ? '' : v })} />}
         <Check label="Ocultar en la web" checked={!!o.hidden} onChange={(v) => set({ hidden: v })} />
+        <details className="sub-card" open={Object.keys(o.style || {}).length > 0 || !!o.show || !!o.variant}>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}><Paintbrush size={14} /> Estilo: tamaño, colores, espacios…</summary>
+          <div style={{ marginTop: 12 }}>
+            <StylePanel style={o.style} cur={pick.cur} isImg={isImg} isBtn={pick.isBtn} outline={pick.outline} variant={o.variant} show={o.show}
+              onStyle={(st) => set({ style: Object.fromEntries(Object.entries(st).filter(([, v]) => v !== '' && v !== undefined)) })}
+              onVariant={(v) => set({ variant: v === (pick.outline ? 'outline' : 'solid') ? '' : v })}
+              onShow={(v) => set({ show: v })} />
+          </div>
+        </details>
         {pick.siblings > 1 && (
           <Field label="Posición junto a los demás">
             <div className="row">
@@ -325,7 +421,36 @@ function DataPanel({ id, page, site, data, upd, onBack, onPick }) {
   const [svc, setSvc] = useState('pre');
   let body = null;
 
-  if (id === 'contacto') {
+  if (id === 'tema') {
+    const t = site.theme || {};
+    const setT = (k) => (v) => setIn(['theme', k], v);
+    const FONTS = ['', 'Poppins', 'Inter', 'Montserrat', 'Nunito', 'DM Sans', 'Raleway', 'Playfair Display', 'Lora', 'Merriweather'];
+    const color = (k, label, def) => (
+      <Field label={label}>
+        <div className="row" style={{ flexWrap: 'nowrap' }}>
+          <input type="color" value={t[k] || def} onChange={(e) => setT(k)(e.target.value)} style={{ width: 48, height: 34, padding: 2 }} />
+          <span className="small muted grow">{t[k] ? t[k].toUpperCase() : 'Original'}</span>
+          {t[k] && <button className="btn sm ghost" onClick={() => setT(k)('')}>Original</button>}
+        </div>
+      </Field>
+    );
+    body = (
+      <>
+        <p className="small muted" style={{ margin: 0 }}>Cambia toda la web a la vez. Para un solo texto o botón, haz clic sobre él en la página.</p>
+        {color('primary', 'Azul principal (títulos, botones)', '#0b2a5b')}
+        {color('secondary', 'Azul secundario (al pasar el mouse)', '#123f86')}
+        {color('highlight', 'Color de las palabras resaltadas', '#2e6bd1')}
+        {color('gold', 'Dorado (detalles y botones en fondo oscuro)', '#c9a13b')}
+        <Select label="Letra de los títulos" value={t.headFont || ''} onChange={setT('headFont')} options={FONTS.map((f) => ({ value: f, label: f || 'Original (Poppins / Inter)' }))} />
+        <Select label="Letra del texto" value={t.bodyFont || ''} onChange={setT('bodyFont')} options={FONTS.map((f) => ({ value: f, label: f || 'Original (Inter)' }))} />
+        <Field label={`Tamaño base del texto: ${t.baseSize ? `${t.baseSize}px` : 'original (17px)'}`}>
+          <input type="range" min={14} max={21} value={t.baseSize || 17} onChange={(e) => setT('baseSize')(Number(e.target.value) === 17 ? '' : Number(e.target.value))} />
+        </Field>
+        {Object.values(t).some(Boolean) && <button className="btn sm" onClick={() => setIn(['theme'], {})}><RotateCcw size={13} /> Volver a los colores y letras originales</button>}
+        <p className="small muted">El modo oscuro del celular mantiene sus propios colores.</p>
+      </>
+    );
+  } else if (id === 'contacto') {
     const c = site.config || {};
     body = (
       <>

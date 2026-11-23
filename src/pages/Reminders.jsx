@@ -1,30 +1,20 @@
 import { useMemo, useState } from 'react';
-import { MessageCircle, Copy, CheckCircle2 } from 'lucide-react';
+import { MessageCircle, CheckCircle2 } from 'lucide-react';
 import { useStore, useTable } from '../lib/store';
 import { byId, money, fmtDate, today, addDays, daysBetween, waLink, firstName } from '../lib/people';
 import { PageHead } from '../components/ui';
 
-const WEEKDAY = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const KEY = 'fw-admin:sent';
 const loadSent = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } };
 
-/** Fecha real de una clase del plan según el inicio del grupo. */
-function classDate(start, week, day) {
-  const ws = addDays(start, (week - 1) * 7);
-  for (let i = 0; i < 7; i++) {
-    const d = addDays(ws, i);
-    if (WEEKDAY[new Date(`${d}T12:00:00`).getDay()] === day) return d;
-  }
-  return null;
-}
-
 export default function Reminders() {
-  const { data, can, notify } = useStore();
+  const { can } = useStore();
   const pays = useTable('payments');
   const enr = useTable('enrollments');
   const people = useTable('people');
   const groups = useTable('course_groups');
   const leads = useTable('inquiries');
+  const logs = useTable('attendance_log', [], { since: addDays(today(), -60) });
   const [sent, setSent] = useState(loadSent);
   const t = today();
   const mark = (id) => {
@@ -55,6 +45,30 @@ export default function Reminders() {
         msg: `Hola ${firstName(s.guardian_name || s.full_name)}, te saludamos de For Winners. Te recordamos que la cuota ${p.installment_no || ''} de ${money(p.amount)} de ${g?.group_name || 'tu curso'} ${late ? `venció el ${fmtDate(p.due_date)}` : `vence el ${fmtDate(p.due_date)}`}. Si ya pagaste, ignora este mensaje. ¡Gracias!`,
       });
     }
+    // Estudiantes inscritos que no vienen hace 7 días o más (según sus firmas).
+    if (logs.rows) {
+      const last = {};
+      for (const l of logs.rows) if (l.person_id && (!last[l.person_id] || l.day > last[l.person_id])) last[l.person_id] = l.day;
+      const active = new Set(enr.rows.filter((e) => e.status === 'active').map((e) => e.student_id));
+      for (const id of active) {
+        const s = pById[id];
+        if (!s || s.status !== 'active') continue;
+        const d = last[id];
+        const gap = d ? daysBetween(d, t) : null;
+        if (d && gap < 7) continue;
+        out.push({
+          id: `abs-${id}-${t.slice(0, 7)}-${d || 'nunca'}`, kind: 'absent', title: s.full_name,
+          sub: d ? `No viene hace ${gap} días (última vez ${fmtDate(d)})` : 'No ha firmado asistencia en los últimos 60 días',
+          phone: s.guardian_phone || s.phone,
+          msg: `Hola ${firstName(s.guardian_name || s.full_name)}, te escribimos de For Winners. Notamos que ${s.guardian_name ? firstName(s.full_name) : 'tú'} no ha${s.guardian_name ? '' : 's'} venido a clases en los últimos días. ¿Todo bien? Queremos ayudarte a no perder el ritmo. 💪`,
+        });
+      }
+      for (const l of logs.rows) {
+        if (l.check_out || l.day >= t) continue;
+        const s = pById[l.person_id];
+        out.push({ id: `open-${l.id}`, kind: 'open', title: l.person_name, sub: `Firmó la entrada el ${fmtDate(l.day)} pero no la salida`, phone: s?.phone, msg: `Hola ${firstName(l.person_name)}, el ${fmtDate(l.day)} registraste tu entrada en For Winners pero no tu salida. ¿A qué hora saliste?` });
+      }
+    }
     for (const l of leads.rows || []) {
       if (l.status !== 'new') continue;
       out.push({
@@ -62,55 +76,34 @@ export default function Reminders() {
         msg: `Hola ${firstName(l.full_name)}, te escribimos de For Winners${l.interested_course ? ` por tu interés en ${l.interested_course}` : ''}. ¿Te podemos ayudar con información de horarios y precios?`,
       });
     }
-    // Simulacros y clases de mañana según el plan de clases de cada grupo.
-    const tomorrow = addDays(t, 1);
-    for (const g of groups.rows) {
-      if (g.status !== 'active' || !g.plan_id || !g.start_date) continue;
-      const plan = data.plans.find((p) => p.id === g.plan_id);
-      if (!plan) continue;
-      const kids = enr.rows.filter((e) => e.group_id === g.id && e.status === 'active').map((e) => pById[e.student_id]).filter(Boolean);
-      for (const c of plan.classes) {
-        const d = classDate(g.start_date, c.week, c.day);
-        if (!d) continue;
-        const isSim = /simulacro/i.test(`${c.module} ${c.content}`);
-        if (isSim && d >= t && daysBetween(t, d) <= 7) {
-          out.push({ id: `sim-${g.id}-${d}`, kind: 'group', title: `${g.group_name}: simulacro`, sub: `${fmtDate(d)} · ${c.time} · ${kids.length} estudiantes`, msg: `📝 Recordatorio For Winners: el ${c.day.toLowerCase()} ${fmtDate(d)} (${c.time}) tenemos simulacro. Llega 10 minutos antes, con lápiz, borrador y calculadora si tu examen la permite. ¡Tú puedes!` });
-        } else if (d === tomorrow) {
-          out.push({ id: `cls-${g.id}-${d}-${c.time}`, kind: 'group', title: `${g.group_name}: clase de mañana`, sub: `${c.time} · ${c.module}`, msg: `📚 Mañana ${c.day.toLowerCase()} ${c.time}: ${c.module} — ${c.content}. ¡Te esperamos en For Winners!` });
-        }
-      }
-    }
     return out;
-  }, [pays.rows, enr.rows, people.rows, groups.rows, leads.rows, data.plans, t]);
+  }, [pays.rows, enr.rows, people.rows, groups.rows, leads.rows, logs.rows, t]);
 
   if (!items) return <div className="empty">Cargando…</div>;
   const sections = [
-    ['late', 'Cuotas vencidas', 'pagos'], ['soon', 'Cuotas que vencen en 3 días', 'pagos'],
-    ['group', 'Mensajes para grupos (simulacros y clases de mañana)', 'grupos'], ['lead', 'Interesados sin contactar', 'interesados'],
+    ['late', 'Cuotas vencidas', 'pagos', 'bad'], ['soon', 'Cuotas que vencen en 3 días', 'pagos', 'warn'],
+    ['absent', 'Estudiantes que no vienen hace una semana', 'asistencia', 'warn'], ['open', 'Salidas sin registrar', 'asistencia', 'warn'],
+    ['lead', 'Interesados sin contactar', 'interesados', 'info'],
   ];
-  const copy = async (txt, id) => {
-    try { await navigator.clipboard.writeText(txt); notify('Mensaje copiado: pégalo en el grupo de WhatsApp'); mark(id); } catch { notify('No se pudo copiar', 'bad'); }
-  };
 
   return (
     <>
-      <PageHead title="Recordatorios" desc="Mensajes listos para enviar por WhatsApp. Un clic abre el chat con el texto escrito; tú solo lo envías." />
-      {sections.map(([kind, title, perm]) => {
+      <PageHead title="Recordatorios" desc="Mensajes listos para WhatsApp. Un clic abre el chat con el texto escrito; tú solo lo envías." />
+      {sections.map(([kind, title, perm, tone]) => {
         const list = items.filter((i) => i.kind === kind && (can(perm) || can('recordatorios')));
         if (!list.length) return null;
+        const pending = list.filter((i) => !sent[i.id]).length;
         return (
-          <div key={kind} className="card" style={{ marginBottom: 14 }}>
-            <div className="card-h"><h2 className="grow">{title}</h2><span className="chip tag-mut">{list.length}</span></div>
-            <div className="col" style={{ gap: 8 }}>
+          <div key={kind} className="card" style={{ marginBottom: 16 }}>
+            <div className="card-h"><h2 className="grow">{title}</h2><span className={`chip tag-${tone === 'info' ? 'info' : tone}`}>{pending} pendiente{pending === 1 ? '' : 's'}</span></div>
+            <div className="list">
               {list.map((i) => (
-                <div key={i.id} className="row" style={{ flexWrap: 'nowrap', opacity: sent[i.id] ? 0.5 : 1 }}>
-                  {sent[i.id] ? <CheckCircle2 size={18} color="#059669" /> : <span className="dot" style={{ background: kind === 'late' ? '#dc2626' : '#d97706' }} />}
+                <div key={i.id} className={`list-row ${sent[i.id] ? 'done' : ''}`}>
+                  {sent[i.id] ? <CheckCircle2 size={18} color="var(--ok)" /> : <span className={`dot tone-${tone}`} />}
                   <div className="grow"><b>{i.title}</b><div className="small muted">{i.sub}</div></div>
-                  {i.phone && waLink(i.phone) ? (
-                    <a className="btn sm wa-btn" href={waLink(i.phone, i.msg)} target="_blank" rel="noopener" onClick={() => mark(i.id)}><MessageCircle size={14} /> WhatsApp</a>
-                  ) : (
-                    <button className="btn sm" onClick={() => copy(i.msg, i.id)}><Copy size={14} /> Copiar mensaje</button>
-                  )}
+                  {i.phone && waLink(i.phone)
+                    ? <a className="btn sm wa-btn" href={waLink(i.phone, i.msg)} target="_blank" rel="noopener" onClick={() => mark(i.id)}><MessageCircle size={14} /> WhatsApp</a>
+                    : <span className="small muted">Sin celular</span>}
                 </div>
               ))}
             </div>

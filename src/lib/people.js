@@ -2,7 +2,9 @@
 import { db } from './backend';
 import { allCourses } from './calc';
 
-export const today = () => new Date().toLocaleDateString('en-CA'); // AAAA-MM-DD en hora local
+// Fechas siempre en hora de Ecuador, igual que el servidor y la página de firma.
+export const TZ = 'America/Guayaquil';
+export const today = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // AAAA-MM-DD
 export const addDays = (iso, n) => {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() + n);
@@ -70,7 +72,33 @@ export function installmentRows(enrollmentId, total, n, firstDue) {
   }));
 }
 
-export const money = (n) => `$${Number(n || 0).toLocaleString('es-EC', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+export const money = (n) => `${Number(n) < 0 ? '-' : ''}$${Math.abs(Number(n || 0)).toLocaleString('es-EC', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
 /** Índices rápidos por id. */
 export const byId = (rows) => Object.fromEntries((rows || []).map((r) => [r.id, r]));
+
+/** Grupo interno de un curso (los estudiantes se inscriben al curso; el grupo se crea solo). */
+export async function ensureCourseGroup(data, key, courses, groups) {
+  const courseId = await ensureCourse(data, key, courses);
+  const g = groups.find((x) => x.course_id === courseId && ['planned', 'active'].includes(x.status));
+  if (g) return g;
+  const c = allCourses(data).find((x) => x.id === key);
+  const row = await db.add('course_groups', { course_id: courseId, group_name: c?.name || 'Curso', status: 'active', start_date: today() });
+  groups.push(row);
+  return row;
+}
+
+/** Duración legible: 2 h 05 min */
+export const dur = (min) => {
+  const m = Math.max(0, Math.round(min || 0));
+  const h = Math.floor(m / 60);
+  return h ? `${h} h ${String(m % 60).padStart(2, '0')} min` : `${m} min`;
+};
+export const hoursNum = (min) => Math.round(((min || 0) / 60) * 10) / 10;
+export const clock = (iso) => (iso ? new Date(iso).toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit' }) : '—');
+export const minutesBetween = (a, b) => Math.max(0, Math.round((new Date(b) - new Date(a)) / 60000));
+export const startOfWeek = (iso = today()) => {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  return d.toLocaleDateString('en-CA');
+};

@@ -5,3 +5,4 @@ dist
 *.log
 capturas
 .dev.vars
+.wrangler
