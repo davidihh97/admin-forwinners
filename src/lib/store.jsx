@@ -115,6 +115,12 @@ export function StoreProvider({ children, session }) {
     setToast({ msg, kind, id: Date.now() });
     setTimeout(() => setToast(null), kind === 'bad' ? 5000 : 3200);
   }, []);
+  // Si alguna acción falla y la pantalla no lo avisa, se muestra igual el error.
+  useEffect(() => {
+    const h = (e) => { const m = e.reason?.message; if (m) notify(m, 'bad'); };
+    window.addEventListener('unhandledrejection', h);
+    return () => window.removeEventListener('unhandledrejection', h);
+  }, [notify]);
   const user = session.user;
   const can = useCallback((mod) => user.role === 'owner' || user.perms.includes(mod), [user]);
   const ops = useDoc('operations', seed, true, notify);

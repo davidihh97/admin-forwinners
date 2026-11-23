@@ -61,8 +61,11 @@ export default function Attendance() {
 
   async function remove(l) {
     if (!confirm(`¿Borrar el registro de ${l.person_name} del ${fmtDate(l.day)}?`)) return;
-    await db.remove('attendance_log', l.id);
-    logs.setRows((rs) => rs.filter((x) => x.id !== l.id));
+    try {
+      await db.remove('attendance_log', l.id);
+      logs.setRows((rs) => rs.filter((x) => x.id !== l.id));
+      notify('Registro borrado');
+    } catch (e) { notify(`No se pudo borrar: ${e.message}`, 'bad'); }
   }
   async function showSig(l) {
     try { setSig({ log: l, ...(await signatures(l.id)) }); } catch (e) { notify(e.message, 'bad'); }

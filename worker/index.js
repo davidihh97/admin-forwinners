@@ -128,7 +128,8 @@ async function api(request, env, url) {
   if (p === '/api/me') return json({ user, siteUrl: env.SITE_URL || 'https://forwinnersec.com' });
   need(user, 401, 'Inicia sesión');
   // Las escrituras solo se aceptan como JSON (protección extra contra formularios de otros sitios).
-  if (m !== 'GET' && p !== '/api/media') need((request.headers.get('Content-Type') || '').includes('application/json'), 415, 'Formato no válido');
+  // (Borrar no lleva datos; la cookie SameSite=Strict ya impide que otros sitios lo usen.)
+  if (m !== 'GET' && m !== 'DELETE' && p !== '/api/media') need((request.headers.get('Content-Type') || '').includes('application/json'), 415, 'Formato no válido');
 
   if (p === '/api/password' && m === 'POST') {
     const b = await body(request);
