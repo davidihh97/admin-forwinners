@@ -149,15 +149,14 @@ const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Bueno
 /** Lo que necesita atención hoy (según los permisos de cada usuario). */
 function Today({ sum, go }) {
   const tiles = [];
-  if (sum.inside != null) tiles.push({ icon: UserCheck, label: 'Dentro ahora', value: sum.inside, sub: `${sum.todayVisits} asistieron hoy`, page: 'asistencia', tone: 'ok' });
-  if (sum.monthHours != null) tiles.push({ icon: Clock, label: 'Horas de estudiantes este mes', value: `${sum.monthHours} h`, page: 'asistencia' });
+  if (sum.todayStudents != null) tiles.push({ icon: UserCheck, label: 'Estudiantes hoy', value: sum.todayStudents, sub: `${sum.todayHours} h de clase registradas`, page: 'asistencia', tone: 'ok' });
+  if (sum.monthHours != null) tiles.push({ icon: Clock, label: 'Horas de estudiantes este mes', value: `${sum.monthHours} h`, sub: sum.openClasses ? `${sum.openClasses} clase(s) grupal(es) abierta(s)` : undefined, page: 'asistencia' });
   if (sum.collectedMonth != null) tiles.push({ icon: Wallet, label: 'Cobrado este mes', value: money(sum.collectedMonth), sub: sum.expensesMonth != null ? `Gastos ${money(sum.expensesMonth)}` : `Vence en 7 días: ${money(sum.dueWeek)}`, page: 'pagos' });
   if (sum.students != null) tiles.push({ icon: Users, label: 'Estudiantes activos', value: sum.students, page: 'estudiantes' });
   const alerts = [];
   if (sum.overdue?.n) alerts.push({ tone: 'bad', text: `${sum.overdue.n} cuota${sum.overdue.n > 1 ? 's' : ''} vencida${sum.overdue.n > 1 ? 's' : ''} por ${money(sum.overdue.amount)}`, page: 'pagos' });
   if (sum.newLeads) alerts.push({ tone: 'info', text: `${sum.newLeads} interesado${sum.newLeads > 1 ? 's' : ''} nuevo${sum.newLeads > 1 ? 's' : ''} sin contactar`, page: 'interesados' });
   if (sum.absent7) alerts.push({ tone: 'warn', text: `${sum.absent7} estudiante${sum.absent7 > 1 ? 's' : ''} inscrito${sum.absent7 > 1 ? 's' : ''} no viene${sum.absent7 > 1 ? 'n' : ''} hace una semana`, page: 'recordatorios' });
-  if (sum.forgotten) alerts.push({ tone: 'warn', text: `${sum.forgotten} salida${sum.forgotten > 1 ? 's' : ''} sin registrar de días anteriores`, page: 'asistencia' });
   if (!tiles.length && !alerts.length) return null;
   return (
     <>

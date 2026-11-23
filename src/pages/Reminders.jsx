@@ -58,15 +58,10 @@ export default function Reminders() {
         if (d && gap < 7) continue;
         out.push({
           id: `abs-${id}-${t.slice(0, 7)}-${d || 'nunca'}`, kind: 'absent', title: s.full_name,
-          sub: d ? `No viene hace ${gap} días (última vez ${fmtDate(d)})` : 'No ha firmado asistencia en los últimos 60 días',
+          sub: d ? `No viene hace ${gap} días (última vez ${fmtDate(d)})` : 'No ha registrado asistencia en los últimos 60 días',
           phone: s.guardian_phone || s.phone,
           msg: `Hola ${firstName(s.guardian_name || s.full_name)}, te escribimos de For Winners. Notamos que ${s.guardian_name ? firstName(s.full_name) : 'tú'} no ha${s.guardian_name ? '' : 's'} venido a clases en los últimos días. ¿Todo bien? Queremos ayudarte a no perder el ritmo. 💪`,
         });
-      }
-      for (const l of logs.rows) {
-        if (l.check_out || l.day >= t) continue;
-        const s = pById[l.person_id];
-        out.push({ id: `open-${l.id}`, kind: 'open', title: l.person_name, sub: `Firmó la entrada el ${fmtDate(l.day)} pero no la salida`, phone: s?.phone, msg: `Hola ${firstName(l.person_name)}, el ${fmtDate(l.day)} registraste tu entrada en For Winners pero no tu salida. ¿A qué hora saliste?` });
       }
     }
     for (const l of leads.rows || []) {
@@ -82,7 +77,7 @@ export default function Reminders() {
   if (!items) return <div className="empty">Cargando…</div>;
   const sections = [
     ['late', 'Cuotas vencidas', 'pagos', 'bad'], ['soon', 'Cuotas que vencen en 3 días', 'pagos', 'warn'],
-    ['absent', 'Estudiantes que no vienen hace una semana', 'asistencia', 'warn'], ['open', 'Salidas sin registrar', 'asistencia', 'warn'],
+    ['absent', 'Estudiantes que no vienen hace una semana', 'asistencia', 'warn'],
     ['lead', 'Interesados sin contactar', 'interesados', 'info'],
   ];
 

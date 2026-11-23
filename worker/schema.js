@@ -84,9 +84,15 @@ export const TABLES = {
     write: [],
   },
   attendance_log: {
-    cols: P('person_id', 'person_name', 'person_type', 'day', 'check_in', 'check_out', 'minutes', 'notes', 'source', 'created_by'),
-    select: 'id, person_id, person_name, person_type, day, check_in, check_out, minutes, source, notes, created_by, (sign_in IS NOT NULL) AS has_sign_in, (sign_out IS NOT NULL) AS has_sign_out',
+    cols: P('person_id', 'person_name', 'person_type', 'day', 'check_in', 'check_out', 'minutes', 'notes', 'source', 'created_by', 'teacher_id', 'teacher_name', 'subject', 'topic', 'class_id', 'reviewed'),
+    select: 'id, person_id, person_name, person_type, day, check_in, check_out, minutes, source, notes, created_by, created_at, teacher_id, teacher_name, subject, topic, class_id, reviewed, (sign_in IS NOT NULL) AS has_sign_in, (sign_out IS NOT NULL) AS has_sign_out',
     read: ['asistencia', 'estudiantes', 'profesores', 'recordatorios'],
+    write: ['asistencia'],
+    dateCol: 'day',
+  },
+  attendance_class: {
+    cols: P('code', 'teacher_id', 'teacher_name', 'subject', 'topic', 'day', 'start_time', 'end_time', 'opens_at', 'closes_at', 'status', 'created_by'),
+    read: ['asistencia', 'profesores'],
     write: ['asistencia'],
     dateCol: 'day',
   },

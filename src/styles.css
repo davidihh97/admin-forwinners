@@ -436,3 +436,13 @@ table.t td.num, table.t th.num { text-align: right; font-variant-numeric: tabula
 }
 button.kpi { font: inherit; color: inherit; width: 100%; }
 .side .overlay { display: none; }
+
+/* pantalla de clase grupal (QR para proyectar) */
+.modal.class-screen { width: min(1100px, 100%); display: grid; grid-template-columns: 1.2fr 1fr; max-height: 94vh; overflow: hidden; }
+.cs-qr { padding: 28px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; background: linear-gradient(180deg, #f6f8fc, #fff); border-right: 1px solid var(--line); overflow: auto; }
+.cs-qr small { text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--accent); font-size: 0.75rem; }
+.cs-qr h2 { font-size: 1.6rem; }
+.cs-qr img { width: min(420px, 100%); aspect-ratio: 1; margin: 10px 0; border-radius: 14px; border: 1px solid var(--line); padding: 10px; background: #fff; }
+.cs-list { padding: 22px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden; }
+@media (max-width: 800px) { .modal.class-screen { grid-template-columns: 1fr; overflow: auto; } .cs-qr { border-right: 0; border-bottom: 1px solid var(--line); } }
+.linkbox, .cs-qr .mono { font-feature-settings: 'calt' 0; }
