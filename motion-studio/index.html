@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Core Motion Studio</title>
+  <style>
+    :root {
+      --a: #00f0ff;
+      --b: #ff2bd6;
+      --bg: #05060f;
+      --glass: rgba(10, 14, 28, 0.55);
+      --line: rgba(255, 255, 255, 0.12);
+      --text: #e9f1ff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    #stage, #stage canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+    #brand { position: fixed; top: 20px; left: 20px; width: min(280px, 62vw); pointer-events: none; z-index: 2;
+      filter: drop-shadow(0 0 6px var(--a)); }
+    #brand svg { width: 100%; height: auto; display: block; overflow: visible; }
+    #brand .stroke { fill: none; stroke: var(--a); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+    #brand .stroke.b { stroke: var(--b); }
+    #brand text { fill: var(--text); font-weight: 800; letter-spacing: 3px; }
+
+    #ui { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 3;
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center;
+      padding: 8px; border-radius: 18px; background: var(--glass); border: 1px solid var(--line);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); max-width: calc(100vw - 32px); }
+    #ui button { appearance: none; border: 1px solid var(--line); background: rgba(255,255,255,0.04);
+      color: var(--text); font: 600 13px/1 inherit; font-family: inherit; padding: 11px 14px; border-radius: 12px;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: background .2s, border-color .2s, transform .1s; }
+    #ui button:hover { background: rgba(255,255,255,0.1); border-color: var(--a); }
+    #ui button:active { transform: scale(0.97); }
+    #ui button:disabled { opacity: .5; cursor: not-allowed; }
+    #ui .dot { width: 10px; height: 10px; border-radius: 50%; background: linear-gradient(135deg, var(--a), var(--b)); }
+    #ui .rec .dot { background: #ff3b4f; box-shadow: 0 0 8px #ff3b4f; }
+    #ui .rec.on { border-color: #ff3b4f; background: rgba(255,59,79,0.15); }
+    #ui .rec.on .dot { animation: blink 0.8s infinite; }
+    @keyframes blink { 50% { opacity: .2; } }
+    #progress { width: 120px; height: 4px; border-radius: 4px; background: rgba(255,255,255,0.1); overflow: hidden; }
+    #progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--a), var(--b)); }
+
+    #toast { position: fixed; top: 22px; right: 20px; z-index: 3; padding: 10px 14px; border-radius: 12px;
+      background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(12px); font-size: 13px;
+      opacity: 0; transform: translateY(-8px); transition: opacity .3s, transform .3s; pointer-events: none; max-width: 70vw; }
+    #toast.show { opacity: 1; transform: none; }
+
+    @media (max-width: 560px) {
+      #ui button { padding: 10px 11px; font-size: 12px; }
+      #progress { width: 100%; order: 10; }
+      #toast { top: auto; bottom: 120px; right: 16px; left: 16px; max-width: none; }
+    }
+    body.render #ui, body.render #toast { display: none; }
+    body.render #brand { visibility: hidden; }
+  </style>
+
+  <!-- GSAP (gratis) y Three.js por CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <!-- Logotipo vectorial SVG que se dibuja al iniciar -->
+  <div id="brand" aria-label="Core Studio">
+    <svg id="logo" viewBox="0 0 280 56">
+      <path class="stroke" data-k="hex" d="M28 4 L48 15.5 L48 40.5 L28 52 L8 40.5 L8 15.5 Z" />
+      <path class="stroke b" data-k="bolt" d="M31 13 L19 30 H27 L24 43 L37 25 H29 Z" />
+      <path class="stroke" data-k="line" d="M62 44 H272" />
+      <text id="logoText" x="62" y="33" font-size="22">CORE·STUDIO</text>
+    </svg>
+  </div>
+
+  <div id="ui">
+    <button id="btnPlay" title="Pausar / Reanudar"><span id="playIcon">❚❚</span><span id="playLabel">Pausar</span></button>
+    <button id="btnPalette" title="Cambiar paleta"><span class="dot"></span><span id="paletteLabel">Neón</span></button>
+    <button id="btnRec" class="rec" title="Grabar los 6 s del bucle"><span class="dot"></span><span id="recLabel">Grabar 6 s</span></button>
+    <div id="progress"><i></i></div>
+  </div>
+  <div id="toast"></div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+    const gsap = window.gsap;
+    const params = new URLSearchParams(location.search);
+    const RENDER_MODE = params.has('render');           // modo de render offline (fotograma a fotograma)
+    const FIX_W = +params.get('w') || 1920;
+    const FIX_H = +params.get('h') || 1080;
+    const LOOP = 6;                                      // duración exacta del bucle (s)
+    const TAU = Math.PI * 2;
+    const CORE_Y = 3.0;
+    if (RENDER_MODE) document.body.classList.add('render');
+
+    const PALETTES = [
+      { name: 'Neón',    a: '#00f0ff', b: '#ff2bd6', bg: '#05060f', core: '#bdf4ff' },
+      { name: 'Solar',   a: '#ffb300', b: '#ff3d00', bg: '#0c0603', core: '#ffe2b3' },
+      { name: 'Tóxico',  a: '#7dff3a', b: '#9b3bff', bg: '#040a06', core: '#e0ffc9' },
+      { name: 'Glaciar', a: '#4aa8ff', b: '#d9f0ff', bg: '#03070e', core: '#ffffff' },
+    ];
+    let paletteIndex = 0;
+    let pal = PALETTES[0];
+
+    // ---------------------------------------------------------------------------
+    // 1) Textura procedural tipo circuito (HTML5 Canvas)
+    // ---------------------------------------------------------------------------
+    function mulberry32(seed) {
+      return function () {
+        let t = (seed += 0x6d2b79f5);
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    const circuitCanvas = document.createElement('canvas');
+    circuitCanvas.width = circuitCanvas.height = 1024;
+
+    function drawCircuit(a, b) {
+      const ctx = circuitCanvas.getContext('2d');
+      const S = circuitCanvas.width, G = 32, rnd = mulberry32(1337);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#04060c';
+      ctx.fillRect(0, 0, S, S);
+      // rejilla tenue
+      ctx.strokeStyle = 'rgba(255,255,255,0.035)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= S; i += G) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, S); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(S, i); ctx.stroke();
+      }
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+      // pistas
+      for (let n = 0; n < 90; n++) {
+        const col = rnd() < 0.6 ? a : b;
+        let x = Math.floor(rnd() * (S / G)) * G, y = Math.floor(rnd() * (S / G)) * G;
+        let d = Math.floor(rnd() * 4) * 2;
+        const pts = [[x, y]];
+        const segs = 3 + Math.floor(rnd() * 6);
+        for (let s = 0; s < segs; s++) {
+          const len = (1 + Math.floor(rnd() * 4)) * G;
+          x += dirs[d][0] * len; y += dirs[d][1] * len;
+          pts.push([x, y]);
+          d = (d + (rnd() < 0.5 ? 1 : 7)) % 8;
+        }
+        const w = rnd() < 0.2 ? 4 : 2;
+        for (const pass of [{ blur: 18, alpha: 0.55, w: w + 2 }, { blur: 0, alpha: 1, w }]) {
+          ctx.shadowColor = col; ctx.shadowBlur = pass.blur;
+          ctx.globalAlpha = pass.alpha; ctx.strokeStyle = col; ctx.lineWidth = pass.w;
+          ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+          for (const p of pts.slice(1)) ctx.lineTo(p[0], p[1]);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1; ctx.shadowBlur = 12; ctx.fillStyle = col;
+        for (const p of [pts[0], pts[pts.length - 1]]) {
+          ctx.beginPath(); ctx.arc(p[0], p[1], 5, 0, TAU); ctx.fill();
+          ctx.fillStyle = '#04060c'; ctx.beginPath(); ctx.arc(p[0], p[1], 2, 0, TAU); ctx.fill();
+          ctx.fillStyle = col;
+        }
+      }
+      // chips
+      ctx.shadowBlur = 10;
+      for (let n = 0; n < 10; n++) {
+        const col = rnd() < 0.5 ? a : b;
+        const cw = (2 + Math.floor(rnd() * 3)) * G, ch = (2 + Math.floor(rnd() * 2)) * G;
+        const cx = Math.floor(rnd() * (S / G - 4)) * G, cy = Math.floor(rnd() * (S / G - 4)) * G;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = '#070a14'; ctx.fillRect(cx, cy, cw, ch);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.strokeStyle = col; ctx.shadowColor = col; ctx.lineWidth = 2; ctx.strokeRect(cx, cy, cw, ch);
+        ctx.fillStyle = col;
+        for (let px = cx + 8; px < cx + cw - 4; px += 10) { ctx.fillRect(px, cy - 7, 4, 7); ctx.fillRect(px, cy + ch, 4, 7); }
+      }
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    }
+    drawCircuit(pal.a, pal.b);
+
+    const circuitTextures = [];
+    function makeCircuitTexture(rx, ry) {
+      const t = new THREE.CanvasTexture(circuitCanvas);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(rx, ry);
+      t.anisotropy = 8;
+      circuitTextures.push(t);
+      return t;
+    }
+
+    // Sprite de partícula generado por código
+    function makeGlowSprite() {
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const g = c.getContext('2d');
+      const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grd.addColorStop(0, 'rgba(255,255,255,1)');
+      grd.addColorStop(0.25, 'rgba(255,255,255,0.8)');
+      grd.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+    }
+
+    // ---------------------------------------------------------------------------
+    // 2) Renderer, escena, luces
+    // ---------------------------------------------------------------------------
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(RENDER_MODE ? 1 : Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.getElementById('stage').appendChild(renderer.domElement);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(pal.bg);
+    scene.fog = new THREE.FogExp2(pal.bg, 0.032);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+    const camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.1, 200);
+    const camTarget = new THREE.Vector3(0.9, 2.3, 0);
+
+    const ambient = new THREE.AmbientLight(0x6070a0, 0.35);
+    scene.add(ambient);
+    const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+    sun.position.set(5, 11, 7);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    Object.assign(sun.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 1, far: 40 });
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.02;
+    scene.add(sun);
+    const pointA = new THREE.PointLight(pal.a, 60, 25, 2);   // cian
+    pointA.position.set(-3.8, 3.2, 2.5);
+    const pointB = new THREE.PointLight(pal.b, 60, 25, 2);   // magenta
+    pointB.position.set(2.6, 2.0, -4.2);
+    scene.add(pointA, pointB);
+
+    // Suelo con textura de circuito
+    const floorMat = new THREE.MeshStandardMaterial({
+      color: 0x0b0e18, metalness: 0.55, roughness: 0.5,
+      emissive: new THREE.Color(pal.a), emissiveMap: makeCircuitTexture(7, 7), emissiveIntensity: 0.35,
+    });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // ---------------------------------------------------------------------------
+    // Núcleo energético: icosaedro de cristal/metal + corazón + 3 anillos
+    // ---------------------------------------------------------------------------
+    const coreGroup = new THREE.Group();
+    coreGroup.position.y = CORE_Y;
+    scene.add(coreGroup);
+
+    const coreMat = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(pal.core), metalness: 0.35, roughness: 0.08,
+      transmission: 0.55, thickness: 1.2, ior: 1.6, clearcoat: 1, clearcoatRoughness: 0.05,
+      iridescence: 0.6, iridescenceIOR: 1.4, envMapIntensity: 1.6, flatShading: true,
+      emissive: new THREE.Color(pal.a), emissiveMap: makeCircuitTexture(1, 1), emissiveIntensity: 0.8,
+    });
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 0), coreMat);
+    core.castShadow = true;
+    coreGroup.add(core);
+
+    const heartMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pal.a).multiplyScalar(2.2), toneMapped: false });
+    const heart = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 2), heartMat);
+    coreGroup.add(heart);
+
+    const wireMat = new THREE.LineBasicMaterial({ color: new THREE.Color(pal.b), transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending });
+    const wire = new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(1.3, 1)), wireMat);
+    coreGroup.add(wire);
+
+    const ringDefs = [
+      { r: 1.65, tube: 0.075, tilt: [Math.PI / 2, 0, 0.25], axis: 'y', k: 1, m: 1, dir: 1, col: 'a', amp: 0.16 },
+      { r: 2.1, tube: 0.06, tilt: [0.35, 0, 0.6], axis: 'x', k: 1, m: 2, dir: -1, col: 'b', amp: 0.12 },
+      { r: 2.55, tube: 0.085, tilt: [-0.5, 0.4, 0], axis: 'y', k: 2, m: 1, dir: 1, col: 'a', amp: 0.09 },
+    ];
+    const rings = ringDefs.map((d) => {
+      const holder = new THREE.Group();
+      holder.rotation.set(...d.tilt);
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x1a1e2a, metalness: 0.9, roughness: 0.22,
+        emissive: new THREE.Color(pal[d.col]), emissiveMap: makeCircuitTexture(10, 1), emissiveIntensity: 1.6,
+      });
+      const mesh = new THREE.Mesh(new THREE.TorusGeometry(d.r, d.tube, 24, 200), mat);
+      mesh.castShadow = true;
+      const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(pal[d.col]).multiplyScalar(1.8), toneMapped: false });
+      const glow = new THREE.Mesh(new THREE.TorusGeometry(d.r, 0.012, 8, 200), glowMat);
+      glow.position.z = 0; glow.scale.setScalar(1.0);
+      const spinner = new THREE.Group();
+      spinner.add(mesh, glow);
+      holder.add(spinner);
+      coreGroup.add(holder);
+      return { ...d, holder, spinner, mat, glowMat };
+    });
+
+    // Sistema de 300 partículas suspendidas
+    const PCOUNT = 300;
+    const pGeo = new THREE.BufferGeometry();
+    const pBase = new Float32Array(PCOUNT * 3);
+    const pPos = new Float32Array(PCOUNT * 3);
+    const pCol = new Float32Array(PCOUNT * 3);
+    const pMeta = [];
+    {
+      const rnd = mulberry32(42);
+      for (let i = 0; i < PCOUNT; i++) {
+        const r = 3.2 + rnd() * 5.5, th = rnd() * TAU;
+        pBase[i * 3] = Math.cos(th) * r;
+        pBase[i * 3 + 1] = 0.4 + rnd() * 6.8;
+        pBase[i * 3 + 2] = Math.sin(th) * r;
+        pMeta.push({ n: 1 + Math.floor(rnd() * 2), ph: rnd() * TAU, amp: 0.15 + rnd() * 0.45, mix: rnd() });
+      }
+    }
+    pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+    pGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3));
+    const pMat = new THREE.PointsMaterial({
+      size: 0.11, map: makeGlowSprite(), vertexColors: true, transparent: true,
+      depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true,
+    });
+    const particles = new THREE.Points(pGeo, pMat);
+    scene.add(particles);
+    function paintParticles() {
+      const ca = new THREE.Color(pal.a), cb = new THREE.Color(pal.b), c = new THREE.Color();
+      pMeta.forEach((m, i) => { c.copy(ca).lerp(cb, m.mix > 0.5 ? 1 : 0).multiplyScalar(1.6); c.toArray(pCol, i * 3); });
+      pGeo.attributes.color.needsUpdate = true;
+    }
+    paintParticles();
+
+    // ---------------------------------------------------------------------------
+    // Personaje 3D: robot que saluda a la audiencia
+    // ---------------------------------------------------------------------------
+    const robot = new THREE.Group();
+    robot.position.set(3.9, 0, 1.6);
+    robot.scale.setScalar(1.2);
+    scene.add(robot);
+    const rig = new THREE.Group();          // para el bote / squash
+    robot.add(rig);
+
+    const shellMat = new THREE.MeshPhysicalMaterial({ color: 0xc9cfdc, metalness: 0.35, roughness: 0.32, clearcoat: 0.8, clearcoatRoughness: 0.15 });
+    const darkMat = new THREE.MeshPhysicalMaterial({ color: 0x07080d, metalness: 0.5, roughness: 0.12, clearcoat: 1 });
+    const jointMat = new THREE.MeshStandardMaterial({ color: 0x2a2f3d, metalness: 0.8, roughness: 0.35 });
+    const glowA = new THREE.MeshBasicMaterial({ color: new THREE.Color(pal.a).multiplyScalar(2), toneMapped: false });
+    const glowB = new THREE.MeshBasicMaterial({ color: new THREE.Color(pal.b).multiplyScalar(2), toneMapped: false });
+
+    const mk = (geo, mat, x = 0, y = 0, z = 0, parent = rig) => {
+      const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m;
+    };
+    // piernas y pies
+    for (const sx of [-1, 1]) {
+      mk(new THREE.CapsuleGeometry(0.11, 0.3, 6, 16), jointMat, 0.18 * sx, 0.33, 0);
+      const foot = mk(new THREE.SphereGeometry(0.17, 24, 16), shellMat, 0.18 * sx, 0.1, 0.05);
+      foot.scale.set(1, 0.55, 1.35);
+    }
+    // cuerpo
+    const torso = mk(new THREE.CapsuleGeometry(0.42, 0.42, 12, 32), shellMat, 0, 0.98, 0);
+    torso.scale.set(1, 1, 0.85);
+    const belt = mk(new THREE.TorusGeometry(0.41, 0.03, 8, 48), glowB, 0, 0.78, 0);
+    belt.rotation.x = Math.PI / 2; belt.scale.set(1, 0.85, 1);
+    const chest = mk(new THREE.CircleGeometry(0.11, 6), glowA, 0, 1.05, 0.365);
+    const chestRing = mk(new THREE.TorusGeometry(0.15, 0.018, 8, 6), darkMat, 0, 1.05, 0.36);
+    // cuello y cabeza
+    mk(new THREE.CylinderGeometry(0.1, 0.12, 0.14, 16), jointMat, 0, 1.58, 0);
+    const head = new THREE.Group();
+    head.position.set(0, 1.92, 0);
+    rig.add(head);
+    const skull = mk(new THREE.SphereGeometry(0.42, 40, 28), shellMat, 0, 0, 0, head);
+    skull.scale.set(1.15, 0.95, 1);
+    const visor = mk(new THREE.SphereGeometry(0.36, 40, 28), darkMat, 0, 0, 0.26, head);
+    visor.scale.set(1.05, 0.7, 0.6);
+    const eyes = [-1, 1].map((sx) => mk(new THREE.CapsuleGeometry(0.048, 0.07, 6, 12), glowA, 0.13 * sx, 0.04, 0.45, head));
+    const smile = mk(new THREE.TorusGeometry(0.085, 0.016, 8, 24, Math.PI), glowA, 0, -0.07, 0.455, head);
+    smile.rotation.z = Math.PI;
+    for (const sx of [-1, 1]) {
+      const ear = mk(new THREE.CylinderGeometry(0.1, 0.1, 0.08, 24), jointMat, 0.47 * sx, 0, 0, head);
+      ear.rotation.z = Math.PI / 2;
+      const earGlow = mk(new THREE.TorusGeometry(0.07, 0.014, 8, 24), glowB, 0.515 * sx, 0, 0, head);
+      earGlow.rotation.y = Math.PI / 2;
+    }
+    mk(new THREE.CylinderGeometry(0.015, 0.015, 0.26, 8), jointMat, 0, 0.5, 0, head);
+    const antennaTip = mk(new THREE.SphereGeometry(0.055, 16, 12), glowB, 0, 0.65, 0, head);
+
+    // brazos (hombro → codo → mano)
+    function makeArm(side) {
+      const shoulder = new THREE.Group();
+      shoulder.position.set(0.5 * side, 1.25, 0);
+      rig.add(shoulder);
+      mk(new THREE.SphereGeometry(0.12, 20, 14), jointMat, 0, 0, 0, shoulder);
+      mk(new THREE.CapsuleGeometry(0.085, 0.22, 6, 14), shellMat, 0, -0.2, 0, shoulder);
+      const elbow = new THREE.Group();
+      elbow.position.set(0, -0.4, 0);
+      shoulder.add(elbow);
+      mk(new THREE.SphereGeometry(0.08, 16, 12), jointMat, 0, 0, 0, elbow);
+      mk(new THREE.CapsuleGeometry(0.08, 0.18, 6, 14), shellMat, 0, -0.16, 0, elbow);
+      const hand = mk(new THREE.SphereGeometry(0.12, 20, 14), shellMat, 0, -0.36, 0, elbow);
+      hand.scale.set(1, 1.1, 0.8);
+      shoulder.rotation.z = 0.12 * side;
+      return { shoulder, elbow };
+    }
+    const armR = makeArm(1);   // brazo que saluda (lado opuesto al núcleo)
+    const armL = makeArm(-1);
+
+    // Bocadillo "¡Hola!"
+    const bubbleCanvas = document.createElement('canvas');
+    bubbleCanvas.width = 512; bubbleCanvas.height = 256;
+    function drawBubble() {
+      const g = bubbleCanvas.getContext('2d');
+      g.clearRect(0, 0, 512, 256);
+      g.fillStyle = 'rgba(8,10,20,0.88)';
+      g.strokeStyle = pal.a; g.lineWidth = 8; g.shadowColor = pal.a; g.shadowBlur = 24;
+      g.beginPath(); g.roundRect(24, 24, 464, 160, 60);
+      g.moveTo(130, 184); g.lineTo(100, 236); g.lineTo(190, 184);
+      g.fill(); g.stroke();
+      g.shadowBlur = 16; g.fillStyle = '#ffffff';
+      g.font = '800 92px system-ui, "Segoe UI", sans-serif';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('¡Hola!', 256, 108);
+    }
+    drawBubble();
+    const bubbleTex = new THREE.CanvasTexture(bubbleCanvas);
+    bubbleTex.colorSpace = THREE.SRGBColorSpace;
+    const bubble = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleTex, color: 0xb8b8b8, transparent: true, depthWrite: false }));
+    bubble.center.set(0.2, 0.05);
+    bubble.position.set(0.55, 2.55, 0);
+    robot.add(bubble);
+
+    // ---------------------------------------------------------------------------
+    // Post-procesado (bloom neón)
+    // ---------------------------------------------------------------------------
+    const rt = new THREE.WebGLRenderTarget(16, 16, { type: THREE.HalfFloatType, samples: 4 });
+    const composer = new EffectComposer(renderer, rt);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(new THREE.Vector2(16, 16), 0.9, 0.5, 0.86);
+    composer.addPass(bloom);
+    composer.addPass(new OutputPass());
+
+    // Lienzo compuesto (3D + logo) que es el que se graba / exporta
+    const comp = document.createElement('canvas');
+    const cctx = comp.getContext('2d');
+
+    function resize() {
+      const w = RENDER_MODE ? FIX_W : window.innerWidth;
+      const h = RENDER_MODE ? FIX_H : window.innerHeight;
+      renderer.setSize(w, h, !RENDER_MODE);
+      composer.setPixelRatio(renderer.getPixelRatio());
+      composer.setSize(w, h);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      const db = renderer.domElement;
+      comp.width = db.width - (db.width % 2);      // dimensiones pares (requisito de los códecs)
+      comp.height = db.height - (db.height % 2);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // ---------------------------------------------------------------------------
+    // 3) Línea de tiempo GSAP de 6 s en bucle
+    // ---------------------------------------------------------------------------
+    const state = { pulse: 0, spin: 0, coreScale: 1, orbit: -0.55, dolly: 0, logo: 0, bubble: 0 };
+    const tl = gsap.timeline({ repeat: -1, defaults: { immediateRender: false } });
+
+    // Cámara: órbita suave de ida y vuelta + acercamiento
+    tl.fromTo(state, { orbit: -0.55 }, { orbit: 0.55, duration: 3, ease: 'sine.inOut' }, 0)
+      .fromTo(state, { orbit: 0.55 }, { orbit: -0.55, duration: 3, ease: 'sine.inOut' }, 3)
+      .fromTo(state, { dolly: 0 }, { dolly: 1, duration: 3, ease: 'sine.inOut' }, 0)
+      .fromTo(state, { dolly: 1 }, { dolly: 0, duration: 3, ease: 'sine.inOut' }, 3);
+
+    // Núcleo: expansión / contracción
+    tl.fromTo(state, { coreScale: 1 }, { coreScale: 1.28, duration: 3, ease: 'sine.inOut' }, 0)
+      .fromTo(state, { coreScale: 1.28 }, { coreScale: 1, duration: 3, ease: 'sine.inOut' }, 3);
+
+    // Pulso de luz (4 latidos) que acelera y escala los anillos
+    for (let k = 0; k < 4; k++) {
+      const T = k * 1.5;
+      tl.fromTo(state, { pulse: 0 }, { pulse: 1, duration: 0.12, ease: 'power2.out' }, T)
+        .fromTo(state, { pulse: 1 }, { pulse: 0, duration: 1.38, ease: 'power2.in' }, T + 0.12)
+        .fromTo(state, { spin: (TAU * k) / 4 }, { spin: (TAU * (k + 1)) / 4, duration: 1.5, ease: 'expo.out' }, T);
+    }
+
+    // Personaje: levanta el brazo, saluda, baja el brazo, parpadea
+    const R = armR;
+    tl.fromTo(R.shoulder.rotation, { z: 0.12 }, { z: 2.55, duration: 0.5, ease: 'back.out(1.6)' }, 0.05)
+      .fromTo(R.elbow.rotation, { z: 0 }, { z: -0.5, duration: 0.4, ease: 'power2.out' }, 0.05)
+      .fromTo(R.elbow.rotation, { z: -0.5 }, { z: 0.55, duration: 0.3, ease: 'sine.inOut', repeat: 5, yoyo: true }, 0.5)
+      .fromTo(R.shoulder.rotation, { z: 2.55 }, { z: 0.12, duration: 0.6, ease: 'power2.inOut' }, 2.4)
+      .fromTo(R.elbow.rotation, { z: -0.5 }, { z: 0, duration: 0.6, ease: 'power2.inOut' }, 2.4)
+      .fromTo(head.rotation, { z: 0 }, { z: -0.18, duration: 0.5, ease: 'sine.inOut' }, 0.3)
+      .fromTo(head.rotation, { z: -0.18 }, { z: 0, duration: 0.6, ease: 'sine.inOut' }, 2.4)
+      .fromTo(state, { bubble: 0 }, { bubble: 1, duration: 0.45, ease: 'back.out(2)' }, 0.35)
+      .fromTo(state, { bubble: 1 }, { bubble: 0, duration: 0.3, ease: 'power2.in' }, 2.7);
+    for (const T of [3.7, 5.2]) {
+      for (const e of eyes) {
+        tl.fromTo(e.scale, { y: 1 }, { y: 0.12, duration: 0.07, ease: 'none' }, T)
+          .fromTo(e.scale, { y: 0.12 }, { y: 1, duration: 0.09, ease: 'none' }, T + 0.07);
+      }
+    }
+    tl.set({}, {}, LOOP);   // fija la duración exacta a 6 s
+    tl.totalTime(0);
+
+    // ---------------------------------------------------------------------------
+    // Actualización determinista de la escena a partir del tiempo t
+    // ---------------------------------------------------------------------------
+    const lookTmp = new THREE.Vector3();
+    function update(t) {
+      const lt = ((t % LOOP) + LOOP) % LOOP;
+      const ph = (TAU * lt) / LOOP;
+      const p = state.pulse;
+
+      // cámara
+      const aspect = camera.aspect;
+      const radius = Math.max(10, 13.2 / aspect) - state.dolly * 1.4;
+      camera.position.set(
+        camTarget.x + Math.sin(state.orbit) * radius,
+        camTarget.y + 1.3 + Math.sin(ph) * 0.5,
+        camTarget.z + Math.cos(state.orbit) * radius,
+      );
+      camera.lookAt(camTarget);
+
+      // núcleo
+      core.scale.setScalar(state.coreScale + p * 0.07);
+      core.rotation.set(ph, ph * 2, 0);
+      heart.scale.setScalar(0.85 + p * 0.55 + (state.coreScale - 1) * 0.6);
+      wire.rotation.set(-ph, -ph, ph);
+      wire.scale.setScalar(1 + (state.coreScale - 1) * 0.5 + p * 0.12);
+      wireMat.opacity = 0.3 + p * 0.6;
+      coreMat.emissiveIntensity = 0.6 + p * 2.2;
+      coreGroup.position.y = CORE_Y + Math.sin(ph) * 0.18;
+
+      // anillos: velocidad y escala al ritmo del pulso
+      rings.forEach((r) => {
+        const angle = r.dir * (ph * r.k + state.spin * r.m);
+        r.spinner.rotation[r.axis] = angle;
+        const sc = 1 + p * r.amp + (state.coreScale - 1) * 0.15;
+        r.spinner.scale.setScalar(sc);
+        r.mat.emissiveIntensity = 1.1 + p * 3;
+      });
+
+      // luces
+      pointA.intensity = 40 + p * 90;
+      pointB.intensity = 45 + p * 45;
+      floorMat.emissiveIntensity = 0.16 + p * 0.34;
+      bloom.strength = 0.7 + p * 0.7;
+
+      // partículas suspendidas
+      for (let i = 0; i < PCOUNT; i++) {
+        const m = pMeta[i], a = ph * m.n + m.ph;
+        pPos[i * 3] = pBase[i * 3] + Math.cos(a) * m.amp;
+        pPos[i * 3 + 1] = pBase[i * 3 + 1] + Math.sin(a) * m.amp * 1.4;
+        pPos[i * 3 + 2] = pBase[i * 3 + 2];
+      }
+      pGeo.attributes.position.needsUpdate = true;
+      pMat.size = 0.1 + p * 0.06;
+
+      // personaje: mira a la cámara, bota suavemente
+      lookTmp.set(camera.position.x, robot.position.y, camera.position.z);
+      robot.lookAt(lookTmp);
+      rig.position.y = Math.abs(Math.sin(ph * 2)) * 0.06;
+      rig.rotation.z = Math.sin(ph * 2) * 0.03;
+      armL.shoulder.rotation.z = -0.12 - Math.sin(ph * 2) * 0.08;
+      armL.shoulder.rotation.x = Math.sin(ph * 2) * 0.15;
+      head.rotation.y = Math.sin(ph) * 0.12;
+      antennaTip.scale.setScalar(1 + p * 0.8);
+      chest.scale.setScalar(1 + p * 0.35);
+      bubble.scale.set(1.25 * state.bubble, 0.625 * state.bubble, 1);
+      bubble.visible = state.bubble > 0.01;
+
+      // UI
+      if (!RENDER_MODE) progressBar.style.width = `${(lt / LOOP) * 100}%`;
+      drawLogoDOM(state.logo);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Logo SVG: trazo animado (DOM) + réplica en el lienzo exportado
+    // ---------------------------------------------------------------------------
+    const logoParts = [...document.querySelectorAll('#logo path')].map((el) => {
+      const len = el.getTotalLength();
+      el.style.strokeDasharray = `${len} ${len}`;
+      el.style.strokeDashoffset = `${len}`;
+      const k = el.dataset.k;
+      const range = { hex: [0, 0.6], bolt: [0.3, 0.85], line: [0.55, 1] }[k];
+      return { el, len, path: new Path2D(el.getAttribute('d')), range, isB: el.classList.contains('b') };
+    });
+    const logoText = document.getElementById('logoText');
+    const clamp01 = (v) => Math.min(1, Math.max(0, v));
+    const partProgress = (part, p) => clamp01((p - part.range[0]) / (part.range[1] - part.range[0]));
+    const textAlpha = (p) => clamp01((p - 0.6) / 0.4);
+    function drawLogoDOM(p) {
+      for (const part of logoParts) part.el.style.strokeDashoffset = `${part.len * (1 - partProgress(part, p))}`;
+      logoText.style.opacity = textAlpha(p);
+    }
+    function drawLogoCanvas(ctx, p, sc, x, y) {
+      ctx.save();
+      ctx.translate(x, y); ctx.scale(sc, sc);
+      ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (const part of logoParts) {
+        const q = partProgress(part, p);
+        if (q <= 0) continue;
+        const col = part.isB ? pal.b : pal.a;
+        ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 10;
+        ctx.setLineDash([part.len, part.len]);
+        ctx.lineDashOffset = part.len * (1 - q);
+        ctx.stroke(part.path);
+      }
+      ctx.setLineDash([]);
+      const ta = textAlpha(p);
+      if (ta > 0) {
+        ctx.globalAlpha = ta;
+        ctx.shadowColor = pal.a; ctx.shadowBlur = 8;
+        ctx.fillStyle = '#e9f1ff';
+        ctx.font = '800 22px system-ui, "Segoe UI", Roboto, sans-serif';
+        ctx.letterSpacing = '3px';
+        ctx.fillText('CORE·STUDIO', 62, 33);
+        ctx.letterSpacing = '0px';
+      }
+      ctx.restore();
+    }
+    function composite() {
+      const W = comp.width, H = comp.height;
+      cctx.globalAlpha = 1; cctx.shadowBlur = 0;
+      cctx.drawImage(renderer.domElement, 0, 0, W, H);
+      const sc = Math.max(0.6, H / 1080) * 1.15;
+      drawLogoCanvas(cctx, state.logo, sc, 28 * sc, 24 * sc);
+      // rótulo inferior
+      const a = textAlpha(state.logo);
+      if (a > 0) {
+        cctx.save();
+        cctx.globalAlpha = a * 0.85;
+        cctx.fillStyle = '#e9f1ff';
+        cctx.font = `600 ${Math.round(15 * sc)}px system-ui, "Segoe UI", sans-serif`;
+        cctx.letterSpacing = `${Math.round(4 * sc)}px`;
+        cctx.fillText('NÚCLEO ENERGÉTICO  //  MOTION LAB 3D', 30 * sc, H - 30 * sc);
+        cctx.restore();
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // 4) Paletas en tiempo real
+    // ---------------------------------------------------------------------------
+    function tweenColor(color, hex, mult = 1) {
+      const c = new THREE.Color(hex).multiplyScalar(mult);
+      gsap.to(color, { r: c.r, g: c.g, b: c.b, duration: 0.8, ease: 'power2.inOut', overwrite: true });
+    }
+    function applyPalette(i) {
+      pal = PALETTES[i];
+      const root = document.documentElement.style;
+      root.setProperty('--a', pal.a); root.setProperty('--b', pal.b); root.setProperty('--bg', pal.bg);
+      tweenColor(scene.background, pal.bg);
+      tweenColor(scene.fog.color, pal.bg);
+      tweenColor(pointA.color, pal.a);
+      tweenColor(pointB.color, pal.b);
+      tweenColor(floorMat.emissive, pal.a);
+      tweenColor(coreMat.emissive, pal.a);
+      tweenColor(coreMat.color, pal.core);
+      tweenColor(heartMat.color, pal.a, 2.2);
+      tweenColor(wireMat.color, pal.b);
+      tweenColor(glowA.color, pal.a, 2);
+      tweenColor(glowB.color, pal.b, 2);
+      rings.forEach((r) => { tweenColor(r.mat.emissive, pal[r.col]); tweenColor(r.glowMat.color, pal[r.col], 1.8); });
+      drawCircuit(pal.a, pal.b);
+      circuitTextures.forEach((t) => (t.needsUpdate = true));
+      drawBubble(); bubbleTex.needsUpdate = true;
+      paintParticles();
+      document.getElementById('paletteLabel').textContent = pal.name;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Interfaz: pausa, paleta, grabación con MediaRecorder
+    // ---------------------------------------------------------------------------
+    const progressBar = document.querySelector('#progress i');
+    const toastEl = document.getElementById('toast');
+    let toastTimer;
+    function toast(msg, ms = 2600) {
+      toastEl.textContent = msg; toastEl.classList.add('show');
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('show'), ms);
+    }
+    function setPlayUI() {
+      const paused = tl.paused();
+      document.getElementById('playIcon').textContent = paused ? '▶' : '❚❚';
+      document.getElementById('playLabel').textContent = paused ? 'Reanudar' : 'Pausar';
+    }
+    const btnPlay = document.getElementById('btnPlay');
+    const btnRec = document.getElementById('btnRec');
+    btnPlay.addEventListener('click', () => { if (recorder) return; tl.paused(!tl.paused()); setPlayUI(); });
+    document.getElementById('btnPalette').addEventListener('click', () => {
+      paletteIndex = (paletteIndex + 1) % PALETTES.length;
+      applyPalette(paletteIndex);
+      toast(`Paleta: ${pal.name}`);
+    });
+
+    let recorder = null;
+    function pickMime() {
+      const list = [
+        ['video/mp4;codecs=avc1.42E01E', 'mp4'], ['video/mp4;codecs=avc1', 'mp4'], ['video/mp4', 'mp4'],
+        ['video/webm;codecs=vp9', 'webm'], ['video/webm;codecs=vp8', 'webm'], ['video/webm', 'webm'],
+      ];
+      return list.find(([m]) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || null;
+    }
+    btnRec.addEventListener('click', () => {
+      if (recorder) return;
+      const choice = pickMime();
+      if (!choice || !comp.captureStream) { toast('Tu navegador no soporta MediaRecorder sobre canvas.'); return; }
+      const [mimeType, ext] = choice;
+      const stream = comp.captureStream(60);
+      const chunks = [];
+      recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 16_000_000 });
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((tr) => tr.stop());
+        const blob = new Blob(chunks, { type: mimeType.split(';')[0] });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `nucleo-energetico-6s.${ext}`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        recorder = null;
+        btnRec.classList.remove('on'); btnPlay.disabled = false;
+        document.getElementById('recLabel').textContent = 'Grabar 6 s';
+        toast(`Video descargado (.${ext}, ${(blob.size / 1048576).toFixed(1)} MB)`);
+      };
+      // arranca exactamente al inicio del bucle y para al completar 6 s
+      tl.totalTime(0); tl.paused(false); setPlayUI();
+      update(0); composer.render(); composite();
+      recorder.start(100);
+      btnRec.classList.add('on'); btnPlay.disabled = true;
+      document.getElementById('recLabel').textContent = 'Grabando…';
+      toast('Grabando 6 s del bucle…', 6000);
+      const rec = recorder;
+      const finish = () => {
+        tl.eventCallback('onRepeat', null);
+        clearTimeout(fallback);
+        if (rec.state === 'recording') { composite(); rec.stop(); }
+      };
+      // se detiene cuando la línea de tiempo completa el bucle (6 s exactos de animación);
+      // el temporizador es sólo una red de seguridad si el navegador ralentiza los fotogramas
+      tl.eventCallback('onRepeat', finish);
+      const fallback = setTimeout(finish, LOOP * 1000 * 3);
+    });
+
+    // ---------------------------------------------------------------------------
+    // Bucle de render
+    // ---------------------------------------------------------------------------
+    if (RENDER_MODE) {
+      tl.pause();
+      const logoEase = gsap.parseEase('power2.inOut');
+      // Render determinista: devuelve el fotograma t (segundos) como PNG
+      window.__frame = (t) => {
+        tl.totalTime(t);
+        state.logo = logoEase(clamp01((t - 0.2) / 2.4));
+        update(t);
+        composer.render();
+        composite();
+        return comp.toDataURL('image/png');
+      };
+      window.__ready = true;
+    } else {
+      gsap.to(state, { logo: 1, duration: 2.4, delay: 0.3, ease: 'power2.inOut' });
+      renderer.setAnimationLoop(() => {
+        update(tl.totalTime());
+        composer.render();
+        if (recorder) composite();
+      });
+    }
+  </script>
+</body>
+</html>
