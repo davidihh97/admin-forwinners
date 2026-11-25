@@ -96,6 +96,8 @@ export const defaultSite = {
     { q: '¿Cómo pago?', a: 'Te enviamos los datos por WhatsApp. Pregunta por las opciones de pago disponibles.' },
   ],
   testimonios: [],
+  // Temática de temporada (la web la calcula por fecha; ver src/site/seasonCalendar.js).
+  temporada: { modo: 'auto', intensidad: 'baja', saludo: true, temas: {} },
   portada: { media: {}, services: {}, order: [], hidden: [], heroHidden: [] },
   theme: {},
   overrides: {},

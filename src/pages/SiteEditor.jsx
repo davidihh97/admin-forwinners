@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Send, Monitor, Smartphone, ExternalLink, MousePointerClick, Phone, Megaphone, LayoutGrid, Ruler,
   School, BookMarked, HelpCircle, Quote, Search, PlusSquare, Trash2, ArrowUp, ArrowDown, ArrowLeft,
-  ArrowRight, EyeOff, Eye, RotateCcw, ImageUp, Copy, AlertTriangle, ChevronLeft, History, Palette, Paintbrush,
+  ArrowRight, EyeOff, Eye, RotateCcw, ImageUp, Copy, AlertTriangle, ChevronLeft, History, Palette, Paintbrush, Sparkles,
 } from 'lucide-react';
+import SeasonPanel from '../components/SeasonPanel';
 import StylePanel from '../components/StylePanel';
 import { describeChanges } from '../site/changes';
 import { Modal } from '../components/ui';
@@ -19,6 +20,7 @@ const PANELS = [
   { id: 'tema', label: 'Colores y letras de toda la web', icon: Palette },
   { id: 'contacto', label: 'WhatsApp y contacto', icon: Phone },
   { id: 'aviso', label: 'Barra de aviso', icon: Megaphone },
+  { id: 'temporada', label: 'Temática de temporada (Navidad, fiestas…)', icon: Sparkles },
   { id: 'portada', label: 'Portada: servicios y fotos', icon: LayoutGrid },
   { id: 'nivelacion', label: 'Nivelación: planes y precios', icon: Ruler },
   { id: 'unis', label: 'Preuniversitario: universidades', icon: School },
@@ -29,7 +31,7 @@ const PANELS = [
   { id: 'seo', label: 'Cómo aparece en Google', icon: Search },
 ];
 // Partes que main.js lee al cargar: si cambian, la vista previa se recarga.
-const LIVE_KEYS = ['overrides', 'sections', 'theme'];
+const LIVE_KEYS = ['overrides', 'sections', 'theme', 'temporada'];
 
 export default function SiteEditor() {
   const { site, data, notify, siteUrl, user } = useStore();
@@ -178,7 +180,7 @@ export default function SiteEditor() {
               onDraft={(v) => { site.replace(stripPub(v)); lastSent.current = null; setTimeout(() => send('reload'), 100); notify('Versión cargada en el borrador. Revísala y pulsa Publicar.'); }}
               onPublish={(v, when) => publish(`Se volvió a la versión del ${when}`, stripPub(v), [`Restaurada la versión del ${when}`]).then(() => { site.replace(stripPub(v)); lastSent.current = null; setTimeout(() => send('reload'), 100); })} />
           )}
-          {sel?.kind === 'panel' && sel.id !== 'historial' && <DataPanel onHero={(k) => { setHero(k); if (page !== 'index.html') changePage('index.html'); }} id={sel.id} page={page} site={s} data={data} upd={upd} user={user} onBack={() => setSel(null)} onPick={(x) => setSel(x)} />}
+          {sel?.kind === 'panel' && sel.id !== 'historial' && <DataPanel onSeasonPreview={(x) => frame.current?.contentWindow?.postMessage({ fwSeasonPreview: x }, origin)} onHero={(k) => { setHero(k); if (page !== 'index.html') changePage('index.html'); }} id={sel.id} page={page} site={s} data={data} upd={upd} user={user} onBack={() => setSel(null)} onPick={(x) => setSel(x)} />}
           {!sel && (
             <>
               <div className="ph"><MousePointerClick size={16} /> ¿Qué quieres cambiar?</div>
@@ -426,7 +428,7 @@ function ElementPanel({ pick, page, site, upd, onBack }) {
 }
 
 /* ---------- formularios de datos de la web ---------- */
-function DataPanel({ id, page, site, data, upd, onBack, onPick, onHero }) {
+function DataPanel({ id, page, site, data, upd, onBack, onPick, onHero, onSeasonPreview }) {
   const p = PANELS.find((x) => x.id === id) || PANELS[0];
   const setIn = (path, v) => upd((d) => {
     let o = d;
@@ -475,6 +477,8 @@ function DataPanel({ id, page, site, data, upd, onBack, onPick, onHero }) {
         <p className="small muted">La dirección, el horario y las redes de la página de contacto se cambian haciendo clic sobre ellos.</p>
       </>
     );
+  } else if (id === 'temporada') {
+    body = <SeasonPanel site={site} setIn={setIn} onPreview={(x) => onSeasonPreview?.(x)} />;
   } else if (id === 'aviso') {
     const a = site.aviso || {};
     body = (
