@@ -54,9 +54,11 @@ export function newSection(type, id, page = 'index.html') {
 }
 
 export const SERVICE_KEYS = [
-  ['pre', 'Preuniversitario'], ['sim', 'Simuladores de admisión'], ['voc', 'Test vocacional'], ['diag', 'Diagnóstico gratis'], ['prac', 'Práctica'],
+  ['pre', 'Preuniversitario'], ['sim', 'Simuladores de admisión'], ['voc', 'Test vocacional'], ['diag', 'Diagnóstico gratis'],
   ['eng', 'Inglés'], ['niv', 'Nivelación y tareas dirigidas'], ['ase', 'Asesoría académica'], ['comp', 'Computación e IA'],
 ];
+/** Servicios que aparecen en el menú de la portada (los demás solo salen en la portada grande). */
+export const MENU_KEYS = ['pre', 'niv', 'eng', 'ase', 'comp'];
 
 export const defaultSite = {
   config: {

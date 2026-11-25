@@ -10,7 +10,7 @@ import { Modal } from '../components/ui';
 import { useStore } from '../lib/store';
 import * as backend from '../lib/backend';
 import { buildPublished, publicSnapshot, stable, stripPub } from '../site/publish';
-import { PAGES, SECTION_TYPES, BUTTON_STYLES, SERVICE_KEYS, newSection } from '../site/defaultSite';
+import { PAGES, SECTION_TYPES, BUTTON_STYLES, SERVICE_KEYS, MENU_KEYS, newSection } from '../site/defaultSite';
 import { uid } from '../lib/time';
 import { Text, Select, Seg, Check, Field } from '../components/ui';
 
@@ -492,7 +492,8 @@ function DataPanel({ id, page, site, data, upd, onBack, onPick, onHero }) {
     const P = site.portada || {};
     const o = (P.services || {})[svc] || {};
     const set = (k, v) => setIn(['portada', 'services', svc, k], v);
-    const order = [...(P.order || []).filter((k) => SERVICE_KEYS.some(([x]) => x === k)), ...SERVICE_KEYS.map(([k]) => k).filter((k) => !(P.order || []).includes(k))];
+    const order = [...(P.order || []).filter((k) => MENU_KEYS.includes(k)), ...MENU_KEYS.filter((k) => !(P.order || []).includes(k))];
+    const inMenu = MENU_KEYS.includes(svc);
     const hidden = P.hidden || [];
     body = (
       <>
@@ -508,14 +509,15 @@ function DataPanel({ id, page, site, data, upd, onBack, onPick, onHero }) {
             ))}
           </div>
         </div>
-        <b className="small">{SERVICE_KEYS.find(([x]) => x === svc)?.[1]}</b>
+        <Select label="Servicio que quieres editar" value={svc} onChange={setSvc}
+          options={SERVICE_KEYS.map(([k, l]) => ({ value: k, label: MENU_KEYS.includes(k) ? l : `${l} (solo portada grande)` }))} />
         <p className="small muted" style={{ margin: 0 }}>Deja vacío lo que no quieras cambiar.</p>
-        <div className="sub-card">
+        {inMenu && <div className="sub-card">
           <b className="small">En el menú de servicios</b>
           <Text label="Nombre" value={o.t} onChange={(v) => set('t', v)} />
-          <Text label="Detalle" value={o.d} onChange={(v) => set('d', v)} hint="Ej.: UTN · Central · UPEC · Yachay" />
-        </div>
-        {svc !== 'prac' && (
+          <Text label="Palabras clave" value={o.d} onChange={(v) => set('d', v)} hint="Ej.: Cursos · Simuladores · Test vocacional · Guías" />
+        </div>}
+        {(
           <div className="sub-card">
             <div className="row"><b className="small grow">En la portada grande (sale al azar)</b>
               <button className="btn sm" onClick={() => onHero?.(svc)}>Ver en la vista previa</button></div>
@@ -528,7 +530,7 @@ function DataPanel({ id, page, site, data, upd, onBack, onPick, onHero }) {
           </div>
         )}
         <ImageInput label="Foto o video" value={(P.media || {})[svc]} onChange={(v) => setIn(['portada', 'media', svc], v)} />
-        <p className="small muted" style={{ margin: 0 }}>El menú de servicios usa solo fotos; si pones un video, el menú mantiene su foto y el video se ve en la portada grande.</p>
+        {inMenu && <p className="small muted" style={{ margin: 0 }}>La foto también aparece al pasar el mouse sobre el menú. Si pones un video, el menú mantiene su foto y el video se ve en la portada grande.</p>}
       </>
     );
   } else if (id === 'nivelacion') {
