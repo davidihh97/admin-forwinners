@@ -54,7 +54,7 @@ export function newSection(type, id, page = 'index.html') {
 }
 
 export const SERVICE_KEYS = [
-  ['pre', 'Preuniversitario'], ['sim', 'Simuladores de admisión'], ['voc', 'Test vocacional'], ['diag', 'Diagnóstico gratis'],
+  ['pre', 'Preuniversitario'], ['sim', 'Simuladores de admisión'], ['voc', 'Test vocacional'], ['diag', 'Diagnóstico gratis'], ['prac', 'Práctica'],
   ['eng', 'Inglés'], ['niv', 'Nivelación y tareas dirigidas'], ['ase', 'Asesoría académica'], ['comp', 'Computación e IA'],
 ];
 
@@ -94,7 +94,7 @@ export const defaultSite = {
     { q: '¿Cómo pago?', a: 'Te enviamos los datos por WhatsApp. Pregunta por las opciones de pago disponibles.' },
   ],
   testimonios: [],
-  portada: { media: {}, services: {}, order: [], hidden: [] },
+  portada: { media: {}, services: {}, order: [], hidden: [], heroHidden: [] },
   theme: {},
   overrides: {},
   sections: [],

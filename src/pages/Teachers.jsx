@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Plus, Pencil, MessageCircle, Check } from 'lucide-react';
 import { useStore, useTable } from '../lib/store';
 import { db } from '../lib/backend';
-import { money, today, waLink, firstName, fmtDate, addDays, teacherBlocks } from '../lib/people';
+import { money, today, waLink, firstName, fmtDate, addDays } from '../lib/people';
 import { Modal, PageHead, Text, Num, Seg, Kpi } from '../components/ui';
 const monthLabel = (m) => new Date(`${m}-15T12:00:00`).toLocaleDateString('es-EC', { month: 'long', year: 'numeric' });
 
@@ -10,7 +10,6 @@ export default function Teachers() {
   const { data, notify } = useStore();
   const people = useTable('people');
   const logs = useTable('attendance_log', [], { since: addDays(today(), -200) });
-  const classes = useTable('attendance_class', [], { since: addDays(today(), -200) });
   const payouts = useTable('teacher_payouts');
   const [month, setMonth] = useState(today().slice(0, 7));
   const [edit, setEdit] = useState(null);
@@ -19,16 +18,16 @@ export default function Teachers() {
   const stats = useMemo(() => {
     const m = {};
     for (const t of teachers) m[t.id] = { hours: 0, sessions: 0, noTime: 0, days: new Set() };
-    // Horas = clases que registraron sus estudiantes + sus clases grupales + registros a mano, sin contar dos veces.
-    for (const b of teacherBlocks(logs.rows || [], classes.rows || [])) {
-      if (!b.day.startsWith(month) || !m[b.teacherId]) continue;
-      const x = m[b.teacherId];
+    for (const l of logs.rows || []) {
+      if (!String(l.day).startsWith(month) || !m[l.person_id]) continue;
+      const x = m[l.person_id];
       x.sessions++;
-      x.days.add(b.day);
-      x.hours += b.minutes / 60;
+      x.days.add(l.day);
+      x.hours += (l.minutes || 0) / 60;
+      if (!l.check_out) x.noTime++;
     }
     return m;
-  }, [teachers, logs.rows, classes.rows, month]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [teachers, logs.rows, month]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const rate = (t) => t.hourly_rate ?? data.params.costoProfesorHora;
   const payoutOf = (t) => (payouts.rows || []).find((p) => p.teacher_id === t.id && p.period === month);
@@ -57,7 +56,7 @@ export default function Teachers() {
 
   return (
     <>
-      <PageHead title="Profesores" desc="Las horas salen de las clases que registran sus estudiantes y de sus clases grupales (sin contar dos veces el mismo horario).">
+      <PageHead title="Profesores" desc="Las horas salen de sus firmas de entrada y salida en el enlace de asistencia.">
         <button className="btn primary" onClick={() => setEdit({ full_name: '', phone: '', email: '', subjects: '', hourly_rate: data.params.costoProfesorHora, notes: '' })}><Plus size={16} /> Nuevo profesor</button>
       </PageHead>
       <div className="card" style={{ marginBottom: 14 }}>
@@ -82,7 +81,6 @@ export default function Teachers() {
               <div className="small muted">{t.subjects || 'Materias sin indicar'} · {money(rate(t))}/h</div>
               <div className="row" style={{ marginTop: 10 }}>
                 <div><div className="small muted">Días</div><b>{st.days.size}</b></div>
-                <div><div className="small muted">Clases</div><b>{st.sessions}</b></div>
                 <div><div className="small muted">Horas</div><b>{Math.round(st.hours * 10) / 10}</b></div>
                 <div><div className="small muted">A pagar</div><b>{money(st.hours * rate(t))}</b></div>
               </div>
@@ -95,7 +93,7 @@ export default function Teachers() {
           );
         })}
       </div>
-      {!teachers.length && <div className="card empty">Agrega a tus profesores: cuando sus estudiantes registren asistencia, aquí verás sus horas y cuánto pagarles.</div>}
+      {!teachers.length && <div className="card empty">Agrega a tus profesores: cuando firmen su entrada y salida, aquí verás sus horas y cuánto pagarles.</div>}
 
       {edit && (
         <Modal title={edit.id ? 'Editar profesor' : 'Nuevo profesor'} onClose={() => setEdit(null)}

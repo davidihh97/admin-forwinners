@@ -68,27 +68,3 @@ button, input { font: inherit; color: inherit; }
 .k-phone { font-size: 1.6rem; letter-spacing: 0.4em; text-align: center; max-width: 220px; }
 @media (max-width: 520px) { .k-clock b { font-size: 1.5rem; } .k-head { padding: 14px 16px; } .k-sig-wrap canvas { height: 180px; } }
 @media (prefers-reduced-motion: reduce) { .k-bar i { transition: none; } }
-.k-label { display: block; font-weight: 600; font-size: 0.95rem; margin: 0 0 8px; color: var(--ink); }
-.k-card > .k-label { margin: 4px 0 -8px; }
-.k-label .opt { font-weight: 400; color: var(--mut); }
-.k-steps { display: flex; gap: 8px; font-size: 0.8rem; font-weight: 600; color: var(--mut); }
-.k-steps span { padding: 4px 10px; border-radius: 999px; background: #eef2f8; }
-.k-steps span.on { background: var(--navy); color: #fff; }
-.k-steps span.done { background: #e7f6ee; color: var(--ok); }
-.k-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.k-grid2 .k-label { margin-bottom: 8px; }
-.k-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.k-chip { border: 1.5px solid var(--line); background: #fff; border-radius: 999px; padding: 10px 16px; font-size: 1rem; cursor: pointer; font-weight: 500; }
-.k-chip:hover { border-color: var(--navy-2); }
-.k-chip.on { background: var(--navy); border-color: var(--navy); color: #fff; }
-.k-picked { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: #f3f7fd; border: 1.5px solid #cfdcf3; }
-.k-picked .av, .k-item .av { width: 40px; height: 40px; border-radius: 50%; background: #e6edf8; color: var(--navy); display: grid; place-items: center; font-weight: 700; flex: none; }
-.k-class { background: linear-gradient(135deg, #f3f7fd, #eaf1fb); border: 1px solid #d5e1f4; border-radius: 16px; padding: 16px 18px; display: flex; flex-direction: column; gap: 3px; }
-.k-class small { text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.72rem; font-weight: 700; color: var(--navy-2); }
-.k-class b { font-family: Poppins, Inter, sans-serif; font-size: 1.25rem; }
-.k-class span { color: var(--mut); }
-.k-late { border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; }
-.k-late summary { cursor: pointer; font-weight: 600; color: var(--navy-2); }
-.k-late p { margin: 8px 0 12px; font-size: 0.9rem; }
-select.k-input { appearance: auto; }
-@media (max-width: 520px) { .k-grid2 { grid-template-columns: 1fr 1fr; gap: 8px; } .k-input { font-size: 1.1rem; padding: 14px; } }

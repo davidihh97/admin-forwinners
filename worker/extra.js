@@ -1,13 +1,7 @@
-// Registro de asistencia de estudiantes (enlace público y clases grupales), actividad del equipo y resumen del día.
+// Asistencia con firma (enlace público), registro de actividad y resumen del día.
 
 const TZ = 'America/Guayaquil';
-const OFFSET = '-05:00'; // Ecuador no cambia de horario
 export const localDay = (d = new Date()) => d.toLocaleDateString('en-CA', { timeZone: TZ });
-const localHM = (d = new Date()) => d.toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-const toMin = (hm) => { const [h, m] = String(hm).split(':').map(Number); return h * 60 + m; };
-const isHM = (v) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || ''));
-const isoAt = (day, hm) => new Date(`${day}T${hm}:00${OFFSET}`).toISOString();
-const hmOf = (iso) => localHM(new Date(iso));
 
 // ---------- tablas: se crean y actualizan solas (no hace falta la consola de D1) ----------
 const ATT_COLUMNS = {
@@ -44,6 +38,13 @@ export function ensureSchema(env) {
     const missing = Object.entries(ATT_COLUMNS).filter(([c]) => !have.has(c));
     if (missing.length) await env.DB.batch(missing.map(([c, t]) => env.DB.prepare(`ALTER TABLE attendance_log ADD COLUMN ${c} ${t}`)));
     await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_att_class ON attendance_log(class_id)').run();
+    // Videos por partes: la tabla media (migración 0004) gana tamaño y número de partes.
+    await env.DB.prepare('CREATE TABLE IF NOT EXISTS media_parts (id TEXT NOT NULL, idx INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (id, idx))').run();
+    const media = new Set((await env.DB.prepare('PRAGMA table_info(media)').all()).results.map((r) => r.name));
+    if (media.size) {
+      if (!media.has('size')) await env.DB.prepare('ALTER TABLE media ADD COLUMN size INTEGER').run();
+      if (!media.has('parts')) await env.DB.prepare('ALTER TABLE media ADD COLUMN parts INTEGER').run();
+    }
   })().catch((e) => {
     ready = null;
     throw e;
@@ -54,8 +55,8 @@ export function ensureSchema(env) {
 // ---------- registro de actividad ----------
 const ENTITY = {
   people: 'Persona', courses: 'Curso', course_groups: 'Curso', enrollments: 'Inscripción', payments: 'Pago', exam_scores: 'Nota',
-  inquiries: 'Interesado', teacher_payouts: 'Pago a profesor', attendance_log: 'Asistencia', attendance_class: 'Clase grupal', expenses: 'Gasto',
-  operations: 'Horario y cursos', site_published: 'Página web', kiosk: 'Enlace de asistencia', admin_users: 'Usuario',
+  inquiries: 'Interesado', teacher_payouts: 'Pago a profesor', attendance_log: 'Asistencia', expenses: 'Gasto', media: 'Foto o video',
+  operations: 'Horario y cursos', site_published: 'Página web', kiosk: 'Enlace de firma', admin_users: 'Usuario',
 };
 export const entityName = (k) => ENTITY[k] || k;
 
@@ -86,26 +87,7 @@ export async function audit(env, user, action, entity, entityId, summary, merge 
   }
 }
 
-// ---------- configuración del enlace ----------
-export const DEFAULT_SUBJECTS = ['Matemática', 'Física', 'Química', 'Biología', 'Anatomía', 'Lenguaje', 'Estadística', 'Emprendimiento', 'Razonamiento', 'Inglés', 'Nivelación', 'Tareas dirigidas', 'Tutoría', 'Computación', 'Simulacro'];
-export const DEFAULT_KIOSK = {
-  active: false, token: '', needSignature: false, maxHours: 6, minMinutes: 15, graceMinutes: 90, classOpenBefore: 30,
-  subjects: DEFAULT_SUBJECTS, title: 'For Winners',
-};
-export async function kioskConfig(env) {
-  const row = await env.DB.prepare("SELECT value FROM content WHERE key = 'kiosk'").first();
-  return { ...DEFAULT_KIOSK, ...(row ? JSON.parse(row.value) : {}) };
-}
-
-/** Ventana de una clase grupal: se abre poco antes de terminar y se cierra un rato después. */
-export function classWindow(cfg, day, start, end) {
-  const opens = Math.max(toMin(start), toMin(end) - (Number(cfg.classOpenBefore) || 30));
-  const closes = toMin(end) + (Number(cfg.graceMinutes) || 90);
-  const hm = (m) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-  return { opens_at: isoAt(day, hm(opens)), closes_at: new Date(new Date(isoAt(day, end)).getTime() + (closes - toMin(end)) * 60000).toISOString() };
-}
-
-// ---------- utilidades de seguridad ----------
+// ---------- enlace público de firma ----------
 const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 const enc = new TextEncoder();
 const digest = async (s) => new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(s))));
@@ -115,189 +97,104 @@ async function sameSecret(a, b) {
   for (let i = 0; i < x.length; i++) d |= x[i] ^ y[i];
   return d === 0;
 }
-async function bump(env, key, windowSec) {
+
+export const DEFAULT_KIOSK = { active: false, token: '', needPhone: true, needSignature: true, allowUnknown: false, maxHours: 8, title: 'For Winners' };
+
+async function kioskConfig(env) {
+  const row = await env.DB.prepare("SELECT value FROM content WHERE key = 'kiosk'").first();
+  const v = row ? JSON.parse(row.value) : {};
+  // Opciones guardadas con la versión de «solo salida»: se vuelve a pedir firma y los 4 dígitos.
+  const old = 'graceMinutes' in v && !('needPhone' in v);
+  return { ...DEFAULT_KIOSK, ...v, ...(old ? { needPhone: true, needSignature: true, allowUnknown: false, maxHours: 8 } : {}) };
+}
+
+async function limited(env, request, kind, max) {
+  const ip = request.headers.get('CF-Connecting-IP') || 'local';
   const now = Math.floor(Date.now() / 1000);
   const row = await env.DB.prepare(
     'INSERT INTO rate_limits (k, n, reset_at) VALUES (?1, 1, ?2) ON CONFLICT(k) DO UPDATE SET n = CASE WHEN reset_at <= ?3 THEN 1 ELSE n + 1 END, reset_at = CASE WHEN reset_at <= ?3 THEN ?2 ELSE reset_at END RETURNING n'
-  ).bind(key, now + windowSec, now).first();
-  return row?.n || 0;
+  ).bind(`kiosk-${kind}:${ip}`, now + 3600, now).first();
+  return row && row.n > max;
 }
-async function count(env, key) {
-  const row = await env.DB.prepare('SELECT n, reset_at FROM rate_limits WHERE k = ?').bind(key).first();
-  return row && row.reset_at > Math.floor(Date.now() / 1000) ? row.n : 0;
-}
-const ipOf = (request) => request.headers.get('CF-Connecting-IP') || 'local';
 
 const out = (data, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } });
-class KioskError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
-}
-const fail = (status, msg) => { throw new KioskError(status, msg); };
 
-// ---------- enlace público de asistencia ----------
 export async function kiosk(request, env, url) {
-  try {
-    return await kioskInner(request, env, url);
-  } catch (e) {
-    if (e instanceof KioskError) return out({ error: e.message }, e.status);
-    throw e;
-  }
-}
-
-async function access(env, cfg, key, code) {
-  if (code) {
-    const cls = await env.DB.prepare('SELECT * FROM attendance_class WHERE code = ?').bind(String(code).slice(0, 40)).first();
-    if (!cls) fail(404, 'Esta clase no existe. Escanea el código que muestra el profesor.');
-    return { cls };
-  }
-  if (!cfg.active || !cfg.token || !key || !(await sameSecret(key, cfg.token))) fail(403, 'Este enlace no está activo. Pide el enlace nuevo en recepción.');
-  return { cls: null };
-}
-
-function classState(cls, now = new Date()) {
-  if (cls.status === 'closed') return 'closed';
-  if (cls.day !== localDay(now)) return now < new Date(cls.opens_at) ? 'early' : 'closed';
-  if (now < new Date(cls.opens_at)) return 'early';
-  if (now > new Date(cls.closes_at)) return 'closed';
-  return 'open';
-}
-const classPublic = (cls) => ({
-  teacher: cls.teacher_name, subject: cls.subject, topic: cls.topic || '', day: cls.day, start: cls.start_time, end: cls.end_time,
-  state: classState(cls), opensAt: hmOf(cls.opens_at), closesAt: hmOf(cls.closes_at),
-});
-
-async function verifyStudent(env, request, personId, phone4) {
-  if (await bump(env, `kiosk-verify:${ipOf(request)}`, 3600) > 300) fail(429, 'Demasiados intentos desde este equipo. Avisa en recepción.');
-  const id = Number(personId);
-  if (!id) fail(400, 'Elige tu nombre de la lista.');
-  const lockKey = `kiosk-pin:${id}`;
-  if (await count(env, lockKey) >= 6) fail(429, 'Demasiados intentos con este nombre. Espera una hora o avisa en recepción.');
-  const p = await env.DB.prepare("SELECT id, full_name, phone, guardian_phone FROM people WHERE id = ? AND status = 'active' AND person_type = 'student'").bind(id).first();
-  if (!p) fail(404, 'No encontramos tu nombre entre los estudiantes. Avisa en recepción.');
-  const d = String(phone4 || '').replace(/\D/g, '');
-  const phones = [p.phone, p.guardian_phone].map((x) => String(x || '').replace(/\D/g, '')).filter((x) => x.length >= 4);
-  if (!phones.length) fail(400, 'No tienes un celular registrado. Avisa en recepción para que lo agreguen.');
-  if (d.length !== 4 || !phones.some((x) => x.endsWith(d))) {
-    await bump(env, lockKey, 3600);
-    fail(400, 'Los 4 dígitos no coinciden con el celular registrado. No se puede registrar la asistencia.');
-  }
-  return p;
-}
-
-async function checkOverlap(env, personId, day, start, end) {
-  const { results } = await env.DB.prepare('SELECT check_in, check_out, subject FROM attendance_log WHERE person_id = ? AND day = ? AND check_out IS NOT NULL').bind(personId, day).all();
-  const s = toMin(start);
-  const e = toMin(end);
-  for (const r of results) {
-    const rs = toMin(hmOf(r.check_in));
-    const re = toMin(hmOf(r.check_out));
-    if (s < re && e > rs) fail(409, `Ya registraste ${r.subject || 'una clase'} de ${hmOf(r.check_in)} a ${hmOf(r.check_out)} y se cruza con este horario.`);
-  }
-}
-
-async function monthMinutes(env, personId, day) {
-  return (await env.DB.prepare('SELECT COALESCE(SUM(minutes), 0) AS m FROM attendance_log WHERE person_id = ? AND day LIKE ?').bind(personId, `${day.slice(0, 7)}%`).first()).m;
-}
-
-async function kioskInner(request, env, url) {
   const cfg = await kioskConfig(env);
   const isPost = request.method === 'POST';
   let b = {};
   if (isPost) {
     const t = await request.text();
-    if (t.length > 200_000) fail(413, 'Datos demasiado grandes');
-    try { b = JSON.parse(t || '{}'); } catch { fail(400, 'Datos inválidos'); }
+    if (t.length > 200_000) return out({ error: 'Firma demasiado grande' }, 413);
+    try { b = JSON.parse(t || '{}'); } catch { return out({ error: 'Datos inválidos' }, 400); }
   }
-  const q = isPost ? b : Object.fromEntries(url.searchParams);
-  const { cls } = await access(env, cfg, q.k, q.c);
+  const key = isPost ? b.k : url.searchParams.get('k');
+  if (!cfg.active || !cfg.token || !key || !(await sameSecret(key, cfg.token)))
+    return out({ error: 'Este enlace no está activo. Pide el enlace nuevo en recepción.' }, 403);
+
   const p = url.pathname;
-  const now = new Date();
-  const today = localDay(now);
-
   if (p === '/api/kiosk/info') {
-    if (cls) return out({ title: cfg.title, needSignature: !!cfg.needSignature, class: classPublic(cls), now: localHM(now), today });
-    const { results } = await env.DB.prepare("SELECT id, full_name, subjects FROM people WHERE status = 'active' AND person_type = 'teacher' ORDER BY full_name").all();
-    return out({
-      title: cfg.title, needSignature: !!cfg.needSignature, now: localHM(now), today, maxHours: cfg.maxHours, graceMinutes: cfg.graceMinutes,
-      subjects: (cfg.subjects && cfg.subjects.length ? cfg.subjects : DEFAULT_SUBJECTS),
-      teachers: results.map((t) => ({ id: t.id, name: t.full_name, subjects: String(t.subjects || '').split(/[,;]/).map((s) => s.trim()).filter(Boolean) })),
-    });
-  }
-
-  // El QR de una clase solo sirve mientras su registro está abierto: después no deja ver nombres ni probar dígitos.
-  if (cls && p !== '/api/kiosk/info' && classState(cls, now) !== 'open') {
-    fail(409, classState(cls, now) === 'early' ? `El registro de esta clase se abre a las ${hmOf(cls.opens_at)}.` : 'El registro de esta clase ya se cerró. Avisa al profesor.');
+    return out({ title: cfg.title, needPhone: !!cfg.needPhone, needSignature: !!cfg.needSignature, allowUnknown: !!cfg.allowUnknown, today: localDay() });
   }
 
   if (p === '/api/kiosk/search') {
-    if (await bump(env, `kiosk-search:${ipOf(request)}`, 3600) > 600) fail(429, 'Demasiadas búsquedas. Intenta en un rato.');
-    const qq = norm(q.q);
-    if (qq.length < 2) return out([]);
-    const { results } = await env.DB.prepare("SELECT id, full_name FROM people WHERE status = 'active' AND person_type = 'student'").all();
-    const words = qq.split(' ');
+    if (await limited(env, request, 'search', 400)) return out({ error: 'Demasiadas búsquedas. Intenta en un rato.' }, 429);
+    const q = norm(url.searchParams.get('q'));
+    if (q.length < 2) return out([]);
+    const { results } = await env.DB.prepare("SELECT id, full_name, person_type FROM people WHERE status = 'active' AND person_type IN ('student', 'teacher')").all();
+    const words = q.split(' ');
     const found = results.filter((r) => { const n = norm(r.full_name); return words.every((w) => n.split(' ').some((x) => x.startsWith(w))); }).slice(0, 8);
-    return out(found.map((f) => ({ id: f.id, name: f.full_name })));
+    const today = localDay();
+    const open = found.length
+      ? (await env.DB.prepare(`SELECT person_id FROM attendance_log WHERE check_out IS NULL AND day = ? AND person_id IN (${found.map(() => '?').join(',')})`).bind(today, ...found.map((f) => f.id)).all()).results.map((r) => r.person_id)
+      : [];
+    return out(found.map((f) => ({ id: f.id, name: f.full_name, type: f.person_type, inside: open.includes(f.id) })));
   }
 
-  if (p === '/api/kiosk/verify' && isPost) {
-    const st = await verifyStudent(env, request, b.person_id, b.phone4);
-    return out({ ok: true, name: st.full_name });
-  }
-
-  if (p === '/api/kiosk/register' && isPost) {
-    if (await bump(env, `kiosk-reg:${ipOf(request)}`, 3600) > 200) fail(429, 'Demasiados registros desde este equipo. Avisa en recepción.');
+  if (p === '/api/kiosk/sign' && isPost) {
+    if (await limited(env, request, 'sign', 120)) return out({ error: 'Demasiados registros desde este equipo. Avisa en recepción.' }, 429);
     const sig = String(b.signature || '');
-    if (sig && !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(sig)) fail(400, 'Firma inválida');
-    if (cfg.needSignature && sig.length < 400) fail(400, 'Firma en el recuadro antes de continuar.');
-    const st = await verifyStudent(env, request, b.person_id, b.phone4);
-    let start = String(b.start || '');
-    let end = String(b.end || '');
-    let teacher = null;
-    let subject = String(b.subject || '').trim().slice(0, 60);
-    let topic = String(b.topic || '').trim().slice(0, 200);
-    let classId = null;
-
-    if (cls) {
-      // Clase grupal: profesor, materia, tema y horario los fijó la clase. El estudiante solo puede acortar su tiempo.
-      const state = classState(cls, now);
-      if (state === 'early') fail(409, `El registro de esta clase se abre a las ${hmOf(cls.opens_at)}.`);
-      if (state === 'closed') fail(409, 'El registro de esta clase ya se cerró. Avisa al profesor.');
-      start = isHM(start) ? start : cls.start_time;
-      end = isHM(end) ? end : cls.end_time;
-      if (toMin(start) < toMin(cls.start_time) || toMin(end) > toMin(cls.end_time))
-        fail(400, `La clase fue de ${cls.start_time} a ${cls.end_time}. Solo puedes indicar una hora dentro de ese horario.`);
-      const dup = await env.DB.prepare('SELECT id FROM attendance_log WHERE class_id = ? AND person_id = ?').bind(cls.id, st.id).first();
-      if (dup) fail(409, 'Ya estás registrado en esta clase.');
-      teacher = { id: cls.teacher_id, name: cls.teacher_name };
-      subject = cls.subject;
-      topic = cls.topic || '';
-      classId = cls.id;
+    if (sig && !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(sig)) return out({ error: 'Firma inválida' }, 400);
+    if (cfg.needSignature && sig.length < 400) return out({ error: 'Firma en el recuadro antes de continuar' }, 400);
+    let person = null;
+    let name = '';
+    if (b.person_id) {
+      person = await env.DB.prepare("SELECT id, full_name, person_type, phone, guardian_phone FROM people WHERE id = ? AND status = 'active'").bind(Number(b.person_id)).first();
+      if (!person) return out({ error: 'No te encontramos. Avisa en recepción.' }, 404);
+      if (cfg.needPhone) {
+        const d = String(b.phone4 || '').replace(/\D/g, '');
+        const ok = [person.phone, person.guardian_phone].some((ph) => ph && d.length === 4 && String(ph).replace(/\D/g, '').endsWith(d));
+        if (!ok) return out({ error: 'Los 4 dígitos no coinciden con tu celular registrado.' }, 400);
+      }
+      name = person.full_name;
     } else {
-      if (!isHM(start) || !isHM(end)) fail(400, 'Elige la hora de entrada y de salida.');
-      const tId = Number(b.teacher_id);
-      const t = tId && await env.DB.prepare("SELECT id, full_name FROM people WHERE id = ? AND person_type = 'teacher' AND status = 'active'").bind(tId).first();
-      if (!t) fail(400, 'Elige al profesor de la clase.');
-      teacher = { id: t.id, name: t.full_name };
-      if (!subject) fail(400, 'Elige la materia.');
-      // Reglas de horario: no se registra antes de terminar la clase ni mucho después.
-      const nowM = toMin(localHM(now));
-      if (toMin(end) > nowM + 10) fail(400, `La hora de salida (${end}) todavía no llega. Registra tu asistencia al terminar la clase.`);
-      if (nowM - toMin(end) > (Number(cfg.graceMinutes) || 90))
-        fail(400, `Solo puedes registrar una clase hasta ${cfg.graceMinutes || 90} minutos después de que termina. Avisa en recepción.`);
+      if (!cfg.allowUnknown) return out({ error: 'Busca tu nombre en la lista. Si no apareces, avisa en recepción.' }, 400);
+      name = String(b.name || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      if (name.split(' ').filter((w) => w.length >= 2).length < 2) return out({ error: 'Escribe tu nombre y apellido' }, 400);
     }
-    const minutes = toMin(end) - toMin(start);
-    if (minutes <= 0) fail(400, 'La hora de salida debe ser después de la hora de entrada.');
-    if (minutes < (Number(cfg.minMinutes) || 15)) fail(400, `Una clase debe durar al menos ${cfg.minMinutes || 15} minutos.`);
-    if (minutes > (Number(cfg.maxHours) || 6) * 60) fail(400, `Una clase no puede durar más de ${cfg.maxHours || 6} horas.`);
-    if (toMin(start) < 6 * 60) fail(400, 'Revisa la hora de entrada.');
-    await checkOverlap(env, st.id, today, start, end);
+    const now = new Date();
+    const iso = now.toISOString();
+    const today = localDay(now);
+    const ip = request.headers.get('CF-Connecting-IP') || null;
+    const who = person ? ['person_id = ?', person.id] : ['person_id IS NULL AND person_name = ?', name];
+    const open = await env.DB.prepare(`SELECT * FROM attendance_log WHERE ${who[0]} AND check_out IS NULL AND day = ? ORDER BY id DESC LIMIT 1`).bind(who[1], today).first();
+    const last = await env.DB.prepare(`SELECT check_in, check_out FROM attendance_log WHERE ${who[0]} ORDER BY id DESC LIMIT 1`).bind(who[1]).first();
+    const lastTime = last ? new Date(last.check_out || last.check_in).getTime() : 0;
+    if (now - lastTime < 60_000) return out({ error: 'Ya registramos tu firma hace un momento.' }, 409);
 
-    await env.DB.prepare(`INSERT INTO attendance_log (person_id, person_name, person_type, day, check_in, check_out, minutes, sign_out, source, ip, teacher_id, teacher_name, subject, topic, class_id)
-      VALUES (?, ?, 'student', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(st.id, st.full_name, today, isoAt(today, start), isoAt(today, end), minutes, sig || null, cls ? 'class' : 'kiosk', ipOf(request),
-        teacher.id || null, teacher.name, subject, topic || null, classId).run();
-    return out({ ok: true, name: st.full_name, start, end, minutes, teacher: teacher.name, subject, topic, monthMinutes: await monthMinutes(env, st.id, today) });
+    const month = today.slice(0, 7);
+    const monthMinutes = async () =>
+      (await env.DB.prepare(`SELECT COALESCE(SUM(minutes), 0) AS m FROM attendance_log WHERE ${who[0]} AND day LIKE ?`).bind(who[1], `${month}%`).first()).m;
+
+    if (open) {
+      const minutes = Math.max(0, Math.min(Math.round((now - new Date(open.check_in)) / 60000), (Number(cfg.maxHours) || 12) * 60));
+      await env.DB.prepare('UPDATE attendance_log SET check_out = ?, sign_out = ?, minutes = ? WHERE id = ?').bind(iso, sig || null, minutes, open.id).run();
+      return out({ action: 'out', name, check_in: open.check_in, check_out: iso, minutes, monthMinutes: await monthMinutes() });
+    }
+    await env.DB.prepare('INSERT INTO attendance_log (person_id, person_name, person_type, day, check_in, sign_in, source, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(person?.id || null, name, person?.person_type || 'other', today, iso, sig || null, 'kiosk', ip).run();
+    return out({ action: 'in', name, check_in: iso, monthMinutes: await monthMinutes() });
   }
   return out({ error: 'No encontrado' }, 404);
 }
@@ -309,12 +206,10 @@ export async function summary(env, can) {
   const res = { today };
   const q = (sql, ...a) => env.DB.prepare(sql).bind(...a).first();
   if (can(['asistencia'])) {
-    const t = await q("SELECT COUNT(*) AS n, COUNT(DISTINCT person_id) AS p, COALESCE(SUM(minutes), 0) AS m FROM attendance_log WHERE day = ? AND person_type = 'student'", today);
-    res.todayRecords = t.n;
-    res.todayStudents = t.p;
-    res.todayHours = Math.round((t.m / 60) * 10) / 10;
+    res.inside = (await q('SELECT COUNT(*) AS n FROM attendance_log WHERE day = ? AND check_out IS NULL', today)).n;
+    res.todayVisits = (await q('SELECT COUNT(DISTINCT COALESCE(person_id, person_name)) AS n FROM attendance_log WHERE day = ?', today)).n;
     res.monthHours = Math.round(((await q("SELECT COALESCE(SUM(minutes), 0) AS m FROM attendance_log WHERE day LIKE ? AND person_type = 'student'", `${month}%`)).m / 60) * 10) / 10;
-    res.openClasses = (await q("SELECT COUNT(*) AS n FROM attendance_class WHERE day = ? AND status = 'open' AND closes_at > ?", today, new Date().toISOString())).n;
+    res.forgotten = (await q('SELECT COUNT(*) AS n FROM attendance_log WHERE day < ? AND check_out IS NULL', today)).n;
     res.absent7 = (await q(
       `SELECT COUNT(*) AS n FROM people p WHERE p.person_type = 'student' AND p.status = 'active'
        AND EXISTS (SELECT 1 FROM enrollments e WHERE e.student_id = p.id AND e.status = 'active')

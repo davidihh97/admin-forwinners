@@ -67,7 +67,8 @@ export async function uploadImage(file) {
   if (!file.type.startsWith('image/')) throw new Error('Elige una imagen');
   let blob = file;
   if (!/svg|gif/.test(file.type)) {
-    const img = await createImageBitmap(file);
+    let img;
+    try { img = await createImageBitmap(file); } catch { throw new Error('No se pudo leer la imagen. Prueba con otra foto en JPG o PNG.'); }
     const scale = Math.min(1, 1800 / Math.max(img.width, img.height));
     const c = document.createElement('canvas');
     c.width = Math.round(img.width * scale);
@@ -82,3 +83,24 @@ export async function uploadImage(file) {
 
 export const signatures = (id) => api.get(`attendance/${id}/signatures`);
 export const summary = () => api.get('summary');
+
+/** Sube un video por partes (MP4, WEBM o MOV, hasta 40 MB). Devuelve la ruta pública /m/<id>.mp4 */
+export async function uploadVideo(file, onProgress) {
+  const types = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime' };
+  const type = types[file.type.split('/')[1]] || (file.type === 'video/quicktime' ? 'video/quicktime' : null) || types[(file.name.split('.').pop() || '').toLowerCase()];
+  if (!type) throw new Error('Elige un video MP4, WEBM o MOV');
+  if (file.size > 40_000_000) throw new Error('El video debe pesar menos de 40 MB. Acórtalo o compártelo en menor calidad.');
+  const PART = 1_500_000;
+  const n = Math.ceil(file.size / PART);
+  let id = '';
+  let res;
+  for (let i = 0; i < n; i++) {
+    const blob = new Blob([file.slice(i * PART, (i + 1) * PART)], { type });
+    const q = new URLSearchParams({ i, n, size: file.size, ...(id ? { id } : {}) });
+    res = await call('POST', `media/video?${q}`, undefined, blob);
+    id = res.id;
+    onProgress?.((i + 1) / n);
+  }
+  return res.url;
+}
+export const isVideo = (u) => /\.(mp4|webm|mov)(\?|$)/i.test(String(u || ''));

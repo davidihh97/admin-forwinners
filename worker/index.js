@@ -1,7 +1,7 @@
 // Servidor del panel (admin.forwinnersec.com): sirve la aplicación y su API.
 // Usa la misma base D1 que forwinnersec.com.
 import { MODULES, OPS_KEYS, CONTENT, TABLES } from './schema.js';
-import { ensureSchema, kiosk, audit, describeRow, summary, kioskConfig, classWindow, localDay } from './extra.js';
+import { ensureSchema, kiosk, audit, describeRow, summary } from './extra.js';
 
 const COOKIE = 'fw_admin';
 const SESSION_DAYS = 30;
@@ -129,7 +129,7 @@ async function api(request, env, url) {
   need(user, 401, 'Inicia sesión');
   // Las escrituras solo se aceptan como JSON (protección extra contra formularios de otros sitios).
   // (Borrar no lleva datos; la cookie SameSite=Strict ya impide que otros sitios lo usen.)
-  if (m !== 'GET' && m !== 'DELETE' && p !== '/api/media') need((request.headers.get('Content-Type') || '').includes('application/json'), 415, 'Formato no válido');
+  if (m !== 'GET' && m !== 'DELETE' && !p.startsWith('/api/media')) need((request.headers.get('Content-Type') || '').includes('application/json'), 415, 'Formato no válido');
 
   if (p === '/api/password' && m === 'POST') {
     const b = await body(request);
@@ -163,6 +163,7 @@ async function api(request, env, url) {
     return json(JSON.parse(row.value));
   }
   if (p === '/api/media' && m === 'POST') return uploadMedia(request, env, user);
+  if (p === '/api/media/video' && m === 'POST') return uploadVideoPart(request, env, user, url);
   if (p.startsWith('/api/users')) return users(request, env, user, p);
   if ((r = p.match(/^\/api\/t\/([a-z_]+)(?:\/(bulk|[\w-]+))?$/))) return table(request, env, user, r[1], r[2], url);
   return fail(404, 'No encontrado');
@@ -259,6 +260,33 @@ async function uploadMedia(request, env, user) {
   const id = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
   await env.DB.prepare('INSERT INTO media (id, mime, data) VALUES (?, ?, ?)').bind(id, type, buf).run();
   return json({ url: `/m/${id}` });
+}
+
+// Videos: se suben por partes de 1,5 MB (cada fila de D1 admite hasta 2 MB) y la web los sirve por rangos.
+const VIDEO_PART = 1_500_000;
+const VIDEO_MAX = 40_000_000;
+const VIDEO_EXT = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
+async function uploadVideoPart(request, env, user, url) {
+  need(can(user, ['web']), 403, 'Sin permiso');
+  const type = (request.headers.get('Content-Type') || '').split(';')[0];
+  need(VIDEO_EXT[type], 415, 'Solo videos MP4, WEBM o MOV');
+  const n = Number(url.searchParams.get('n'));
+  const i = Number(url.searchParams.get('i'));
+  const size = Number(url.searchParams.get('size'));
+  need(Number.isInteger(n) && n >= 1 && n <= Math.ceil(VIDEO_MAX / VIDEO_PART) && Number.isInteger(i) && i >= 0 && i < n, 400, 'Partes inválidas');
+  need(size > 0 && size <= VIDEO_MAX, 413, 'El video debe pesar menos de 40 MB');
+  const buf = await request.arrayBuffer();
+  need(buf.byteLength > 0 && buf.byteLength <= VIDEO_PART && (i === n - 1 || buf.byteLength === VIDEO_PART), 400, 'Parte de tamaño inválido');
+  let id = url.searchParams.get('id');
+  if (i === 0) id = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+  need(/^[a-f0-9]{20}$/.test(id || ''), 400, 'Falta el id del video');
+  await env.DB.prepare('INSERT OR REPLACE INTO media_parts (id, idx, data) VALUES (?, ?, ?)').bind(id, i, buf).run();
+  if (i < n - 1) return json({ id });
+  const { c } = await env.DB.prepare('SELECT COUNT(*) AS c FROM media_parts WHERE id = ?').bind(id).first();
+  need(c === n, 400, 'Faltan partes del video, vuelve a subirlo');
+  await env.DB.prepare('INSERT INTO media (id, mime, data, size, parts) VALUES (?, ?, ?, ?, ?)').bind(id, type, new ArrayBuffer(0), size, n).run();
+  await audit(env, user, 'crear', 'media', id, `Video ${(size / 1e6).toFixed(1)} MB`);
+  return json({ id, url: `/m/${id}.${VIDEO_EXT[type]}` });
 }
 
 // ---------------- usuarios del panel ----------------
@@ -368,19 +396,6 @@ async function table(request, env, user, name, sub, url) {
   if (m === 'POST' && !sub) {
     const data = await body(request);
     if (name === 'attendance_log') { data.source = data.source || 'manual'; data.created_by = user.username; }
-    if (name === 'attendance_class') {
-      // La clave del QR y la ventana para registrarse las pone el servidor.
-      need(/^\d\d:\d\d$/.test(data.start_time || '') && /^\d\d:\d\d$/.test(data.end_time || '') && data.start_time < data.end_time, 400, 'Revisa la hora de inicio y fin de la clase');
-      need(data.subject, 400, 'Elige la materia');
-      const t = data.teacher_id && await env.DB.prepare("SELECT full_name FROM people WHERE id = ? AND person_type = 'teacher'").bind(Number(data.teacher_id)).first();
-      need(t, 400, 'Elige al profesor');
-      data.teacher_name = t.full_name;
-      data.day = data.day || localDay();
-      data.code = Array.from(crypto.getRandomValues(new Uint8Array(12)), (x) => 'abcdefghjkmnpqrstuvwxyz23456789'[x % 31]).join('');
-      Object.assign(data, classWindow(await kioskConfig(env), data.day, data.start_time, data.end_time));
-      data.status = 'open';
-      data.created_by = user.username;
-    }
     const row = await insertStmt(env, name, def, data).first();
     if (!def.quiet) await audit(env, user, 'crear', name, row?.id, describeRow(row));
     return json(row);
