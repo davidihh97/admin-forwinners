@@ -86,3 +86,10 @@ Para tener las tablas en local, aplica las migraciones de `for-winners-website` 
 | `src/lib/people.js` | Cuotas, WhatsApp, fechas |
 | `src/site/` | Contenido inicial de la web y publicación |
 | `src/data/seed.json` | Datos iniciales sacados del Excel |
+
+## Temática de temporada
+
+Editor de la web → «Temática de temporada (Navidad, fiestas…)». Guarda `temporada` en el contenido del sitio:
+`{ modo: 'auto'|'force'|'off', forzar, intensidad: 'baja'|'media'|'alta', saludo, temas: { id: { on, variante, desde, hasta, saludo, intensidad } } }`.
+La web decide qué mostrar con `for-winners-website/web/src/season/calendar.js`; `src/site/seasonCalendar.js` es una copia
+de ese archivo para que el panel muestre las mismas fechas y la temática de hoy. El ojo de cada temática la muestra en la vista previa.

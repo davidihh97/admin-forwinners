@@ -41,6 +41,10 @@ export function describeChanges(prev, next) {
     const a = next.aviso || {};
     out.push(prev.aviso?.enabled !== a.enabled ? `Aviso ${a.enabled ? 'activado' : 'desactivado'}` : `Aviso: «${short(a.texto)}»`);
   }
+  if (!same(prev.temporada, next.temporada)) {
+    const t = next.temporada || {};
+    out.push(t.modo === 'off' ? 'Temática de temporada apagada' : t.modo === 'force' ? `Temática de temporada fija: ${t.forzar || 'navidad'}` : 'Temática de temporada (fechas, estilos o saludos)');
+  }
   if (!same(prev.theme, next.theme)) out.push('Colores y letras de la web');
   if (!same(prev.nivelacion, next.nivelacion)) out.push(`Nivelación: ${(next.nivelacion || []).map((x) => `${x.n} $${x.p}`).join(', ')}`);
   if (!same(prev.unis, next.unis)) out.push('Preuniversitario: textos de universidades');
