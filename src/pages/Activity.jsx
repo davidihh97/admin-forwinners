@@ -7,7 +7,7 @@ import { PageHead, Seg } from '../components/ui';
 const ACTIONS = { crear: 'creó', editar: 'editó', borrar: 'borró', publicar: 'publicó', ingresar: 'ingresó al panel' };
 const ENTITY = {
   people: 'persona', courses: 'curso', course_groups: 'curso', enrollments: 'inscripción', payments: 'pago', exam_scores: 'nota',
-  inquiries: 'interesado', teacher_payouts: 'pago a profesor', attendance_log: 'asistencia', attendance_class: 'clase grupal', expenses: 'gasto',
+  inquiries: 'interesado', teacher_payouts: 'pago a profesor', attendance_log: 'asistencia', expenses: 'gasto', media: 'foto o video',
   operations: 'horario y cursos', site_published: 'la página web', kiosk: 'el enlace de firma', admin_users: 'usuario',
 };
 const TONE = { crear: 'tag-ok', editar: 'tag-info', borrar: 'tag-bad', publicar: 'tag-warn', ingresar: 'tag-mut' };

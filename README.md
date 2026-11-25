@@ -9,9 +9,9 @@ Panel privado en **admin.forwinnersec.com** para manejar For Winners y la págin
 | Interesados | Lo que llega desde la web (simuladores, diagnóstico, test vocacional, contacto) en un tablero Nuevo → Contactado → Inscrito → Cerrado |
 | Estudiantes | Fichas e inscripción directa a un curso, con descuento y cuotas automáticas |
 | Pagos y cuotas | Cobros, cuotas vencidas, recordatorio por WhatsApp |
-| Asistencia | Solo estudiantes, al terminar la clase. **Individual** (`/firmar?k=…`): nombre + últimos 4 dígitos del celular (si no coinciden, no se registra), hora de entrada y salida, profesor, materia y tema; el servidor pone la fecha y rechaza salidas en el futuro, registros tardíos, horarios cruzados y duraciones fuera de rango. **Clase grupal** (`/firmar?c=…`): el QR fija profesor, materia y horario; todos se registran a la vez y solo pueden acortar su tiempo. El panel muestra la lista en vivo, «Por revisar» (horarios distintos a sus compañeros o a la clase grupal), horas por estudiante y por profesor, y el registro completo con Excel |
+| Asistencia | Estudiantes y profesores escanean el QR (`/firmar?k=…`), buscan su nombre, confirman con los últimos 4 dígitos de su celular y firman en pantalla; el sistema pone la hora de entrada y de salida. El panel muestra quién está dentro, horas por persona y período, firmas, correcciones a mano y exportación a Excel |
 | Notas de simulacros | Avance de cada estudiante por curso |
-| Profesores | Horas del mes según las clases que registran sus estudiantes (sin contar dos veces el mismo horario) y pago |
+| Profesores | Horas del mes según sus firmas de asistencia y pago |
 | Finanzas | Gastos, cuotas cobradas, pagos a profesores y resultado de cada mes |
 | Actividad | Registro de todo lo que hace el equipo en el panel (solo el administrador) |
 | Recordatorios | Mensajes de WhatsApp listos: cuotas, estudiantes que no vienen hace una semana, salidas sin registrar, interesados sin contactar |

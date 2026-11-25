@@ -90,12 +90,6 @@ export const TABLES = {
     write: ['asistencia'],
     dateCol: 'day',
   },
-  attendance_class: {
-    cols: P('code', 'teacher_id', 'teacher_name', 'subject', 'topic', 'day', 'start_time', 'end_time', 'opens_at', 'closes_at', 'status', 'created_by'),
-    read: ['asistencia', 'profesores'],
-    write: ['asistencia'],
-    dateCol: 'day',
-  },
   expenses: {
     cols: P('date', 'category', 'description', 'amount', 'method', 'notes'),
     read: ['finanzas'],
