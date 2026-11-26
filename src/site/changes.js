@@ -14,19 +14,20 @@ const STYLE_NAMES = {
 
 function describeOverride(a, b) {
   if (!a) a = {};
-  if (!b) return `se quitaron los cambios de «${short(a.orig)}»`;
+  if (!b) return `se quitaron los cambios de «${short(a.orig || a.head || "bloque")}»`;
   const what = [];
   if (!same(a.text, b.text)) what.push(b.text ? `texto «${short(a.text || b.orig)}» → «${short(b.text)}»` : `texto vuelve a «${short(b.orig)}»`);
   if (!same(a.href, b.href)) what.push('enlace');
   if (!same(a.src, b.src)) what.push('imagen');
   if (!same(a.hidden, b.hidden)) what.push(b.hidden ? 'oculto' : 'visible otra vez');
   if (!same(a.pos, b.pos)) what.push('posición');
+  if (!same(a.clones, b.clones)) what.push((b.clones || []).length > (a.clones || []).length ? 'se agregó una copia' : 'se quitó una copia');
   if (!same(a.show, b.show)) what.push(b.show ? `solo en ${b.show === 'mobile' ? 'celular' : 'computadora'}` : 'en todos los dispositivos');
   if (!same(a.variant, b.variant)) what.push('estilo del botón');
   const keys = new Set([...Object.keys(a.style || {}), ...Object.keys(b.style || {})]);
   const st = [...keys].filter((k) => !same(a.style?.[k], b.style?.[k])).map((k) => STYLE_NAMES[k] || k);
   if (st.length) what.push(st.join(', '));
-  return what.length ? `«${short(b.orig, 30)}»: ${what.join('; ')}` : null;
+  return what.length ? `«${short(b.orig || b.head || "bloque", 30)}»: ${what.join('; ')}` : null;
 }
 
 export function describeChanges(prev, next) {

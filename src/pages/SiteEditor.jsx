@@ -33,6 +33,27 @@ const PANELS = [
 // Partes que main.js lee al cargar: si cambian, la vista previa se recarga.
 const LIVE_KEYS = ['overrides', 'sections', 'theme', 'temporada'];
 
+/** Cambia (o crea) el ajuste de un elemento de la página; si queda sin cambios reales, se quita. */
+function patchOverride(d, page, sel, orig, patch, head) {
+  d.overrides ||= {};
+  const arr = (d.overrides[page] ||= []);
+  let cur = arr.find((x) => x.sel === sel);
+  if (!cur) arr.push((cur = head ? { sel, orig, head } : { sel, orig }));
+  Object.assign(cur, patch);
+  for (const k of Object.keys(cur)) {
+    if (k === 'sel' || k === 'orig' || k === 'head') continue;
+    const v = cur[k];
+    if (v === '' || v === undefined || v === false || v === null || (k === 'style' && !Object.keys(v || {}).length) || (k === 'clones' && !v.length)) delete cur[k];
+  }
+  if (!Object.keys(cur).some((k) => k !== 'sel' && k !== 'orig' && k !== 'head')) d.overrides[page] = arr.filter((x) => x !== cur);
+}
+/** Quita una copia agregada con «Duplicar» y todo lo que se cambió dentro de ella. */
+function removeClone(d, page, id) {
+  const arr = (d.overrides || {})[page] || [];
+  for (const o of arr) if (o.clones?.includes(id)) patchOverride(d, page, o.sel, o.orig, { clones: o.clones.filter((x) => x !== id) });
+  d.overrides[page] = (d.overrides[page] || []).filter((o) => !o.sel.startsWith(`[data-fw-clone="${id}"]`));
+}
+
 export default function SiteEditor() {
   const { site, data, notify, siteUrl, user } = useStore();
   const [pubDlg, setPubDlg] = useState(null); // { changes, note }
@@ -44,6 +65,7 @@ export default function SiteEditor() {
   const [published, setPublished] = useState(undefined);
   const [ready, setReady] = useState(false);
   const [broken, setBroken] = useState([]);
+  const [sections, setSections] = useState([]);
   const [busy, setBusy] = useState(false);
   const frame = useRef();
   const stage = useRef();
@@ -91,8 +113,16 @@ export default function SiteEditor() {
         else frame.current.contentWindow.postMessage({ fwDraft: lastSent.current }, origin);
         setReady(true);
       }
-      if (d.fwReady) setBroken(d.fwReady.broken || []);
+      if (d.fwReady) { setBroken(d.fwReady.broken || []); setSections(d.fwReady.sections || []); }
       if (d.fwBroken) setBroken(d.fwBroken);
+      if (d.fwSections) setSections(d.fwSections);
+      // Texto escrito directamente en la página (doble clic).
+      if (d.fwInline?.sel) {
+        const { sel: k, orig, text } = d.fwInline;
+        upd((x) => patchOverride(x, page, k, orig, { text: text === orig ? '' : text }));
+        notify('Texto cambiado');
+      }
+      if (d.fwRefresh) send(true);
       if (d.fwPick) {
         const p = d.fwPick;
         if (p.section) setSel({ kind: 'section', id: p.section });
@@ -104,6 +134,7 @@ export default function SiteEditor() {
     return () => window.removeEventListener('message', h);
   });
 
+  const pick = (k, scroll) => frame.current?.contentWindow?.postMessage({ fwSelect: { sel: k, scroll } }, origin);
   const changePage = (p) => {
     setPage(p);
     setSel(null);
@@ -173,7 +204,7 @@ export default function SiteEditor() {
         </div>
 
         <div className="dz-panel">
-          {sel?.kind === 'el' && <ElementPanel key={sel.pick.sel} pick={sel.pick} page={page} site={s} upd={upd} onBack={() => setSel(null)} />}
+          {sel?.kind === 'el' && <ElementPanel key={sel.pick.sel} pick={sel.pick} page={page} site={s} upd={upd} onBack={() => setSel(null)} onSelect={(k) => pick(k)} />}
           {sel?.kind === 'section' && <SectionPanel id={sel.id} site={s} data={data} upd={upd} onBack={() => setSel(null)} onScroll={(id) => frame.current?.contentWindow?.postMessage({ fwScrollTo: id }, origin)} />}
           {sel?.kind === 'panel' && sel.id === 'historial' && (
             <HistoryPanel published={published} onBack={() => setSel(null)}
@@ -185,12 +216,28 @@ export default function SiteEditor() {
             <>
               <div className="ph"><MousePointerClick size={16} /> ¿Qué quieres cambiar?</div>
               <div className="pb">
-                <p className="small muted" style={{ margin: 0 }}>Haz clic en la página de la izquierda, o elige aquí:</p>
+                <p className="small muted" style={{ margin: 0 }}>Haz clic en la página de la izquierda (doble clic sobre un texto para escribir directamente), o elige aquí:</p>
                 <div className="col" style={{ gap: 2 }}>
                   {PANELS.map((p) => (
                     <div key={p.id} className="sec-item" onClick={() => setSel({ kind: 'panel', id: p.id })}><p.icon size={15} /> {p.label}</div>
                   ))}
                 </div>
+                {sections.length > 1 && (
+                  <>
+                    <b className="small">Secciones de esta página</b>
+                    <p className="small muted" style={{ margin: 0 }}>Ocúltalas o cambia su orden. Clic en el nombre para ir a ella.</p>
+                    <div className="col" style={{ gap: 2 }}>
+                      {sections.map((x, i) => (
+                        <div key={x.sel} className={`sec-item ${x.hidden ? 'off' : ''}`} onClick={() => pick(x.sel)}>
+                          <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.title || `Sección ${i + 1}`}</span>
+                          <button className="btn sm ghost icon" title="Subir" disabled={i === 0} onClick={(e) => { e.stopPropagation(); upd((d) => patchOverride(d, page, x.sel, x.orig, { pos: sections[i - 1].index }, x.head)); }}><ArrowUp size={13} /></button>
+                          <button className="btn sm ghost icon" title="Bajar" disabled={i === sections.length - 1} onClick={(e) => { e.stopPropagation(); upd((d) => patchOverride(d, page, x.sel, x.orig, { pos: sections[i + 1].index }, x.head)); }}><ArrowDown size={13} /></button>
+                          <button className="btn sm ghost icon" title={x.hidden ? 'Mostrar' : 'Ocultar'} onClick={(e) => { e.stopPropagation(); upd((d) => patchOverride(d, page, x.sel, x.orig, { hidden: !x.hidden }, x.head)); }}>{x.hidden ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
                 {pageOverrides.length > 0 && (
                   <>
                     <b className="small">Cambios en esta página ({pageOverrides.length})</b>
@@ -199,9 +246,9 @@ export default function SiteEditor() {
                         <div key={o.sel} className="row small" style={{ flexWrap: 'nowrap' }}>
                           {broken.includes(o.sel) ? <AlertTriangle size={14} color="#d97706" title="Ese texto ya no está en la página" /> : <span className="dot" style={{ background: '#059669' }} />}
                           <span className="grow" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {o.hidden ? 'Oculto: ' : ''}{o.text || o.orig || o.sel}
+                            {o.hidden ? 'Oculto: ' : ''}{o.clones?.length ? `+${o.clones.length} copia${o.clones.length > 1 ? 's' : ''}: ` : ''}{o.text || o.orig || o.head || (o.sel.startsWith('[data-fw-clone') ? 'Dentro de una copia' : 'Bloque')}
                           </span>
-                          <button className="btn sm ghost icon" title="Quitar este cambio" onClick={() => upd((d) => { d.overrides[page] = d.overrides[page].filter((x) => x.sel !== o.sel); })}><RotateCcw size={13} /></button>
+                          <button className="btn sm ghost icon" title="Quitar este cambio" onClick={() => upd((d) => { for (const id of o.clones || []) removeClone(d, page, id); d.overrides[page] = d.overrides[page].filter((x) => x.sel !== o.sel); })}><RotateCcw size={13} /></button>
                         </div>
                       ))}
                     </div>
@@ -362,27 +409,19 @@ function ListEditor({ items = [], onChange, fields, newItem, addLabel = 'Agregar
 }
 
 /* ---------- elemento de la página (texto, botón, imagen) ---------- */
-function ElementPanel({ pick, page, site, upd, onBack }) {
+function ElementPanel({ pick, page, site, upd, onBack, onSelect }) {
   const list = (site.overrides || {})[page] || [];
   const o = list.find((x) => x.sel === pick.sel) || {};
-  const set = (patch) =>
-    upd((d) => {
-      d.overrides ||= {};
-      const arr = (d.overrides[page] ||= []);
-      let cur = arr.find((x) => x.sel === pick.sel);
-      if (!cur) arr.push((cur = { sel: pick.sel, orig: pick.orig }));
-      Object.assign(cur, patch);
-      for (const k of Object.keys(cur)) {
-        if (k === 'sel' || k === 'orig') continue;
-        if (cur[k] === '' || cur[k] === undefined || cur[k] === false || (k === 'style' && !Object.keys(cur[k] || {}).length)) delete cur[k];
-      }
-      // Sin cambios reales (solo el selector y el texto original): se quita.
-      if (!Object.keys(cur).some((k) => k !== 'sel' && k !== 'orig')) d.overrides[page] = arr.filter((x) => x !== cur);
-    });
+  const set = (patch) => upd((d) => patchOverride(d, page, pick.sel, pick.orig, patch, pick.head));
   const isLink = pick.tag === 'a';
   const isImg = pick.tag === 'img';
   const pos = o.pos ?? pick.index;
-  const names = { a: isLink && /btn/.test(pick.sel) ? 'Botón' : 'Enlace', img: 'Imagen', h1: 'Título principal', h2: 'Título', h3: 'Subtítulo', p: 'Párrafo', li: 'Elemento de lista', button: 'Botón' };
+  const names = { a: isLink && /btn/.test(pick.sel) ? 'Botón' : 'Enlace', img: 'Imagen', h1: 'Título principal', h2: 'Título', h3: 'Subtítulo', p: 'Párrafo', li: 'Elemento de lista', button: 'Botón', section: 'Sección', ul: 'Lista', ol: 'Lista', figure: 'Foto', div: 'Bloque', article: 'Tarjeta' };
+  const duplicate = () => {
+    const id = uid('c');
+    upd((d) => patchOverride(d, page, pick.sel, pick.orig, { clones: [...(o.clones || []), id] }, pick.head));
+    setTimeout(() => onSelect(`[data-fw-clone="${id}"]`), 900);
+  };
   return (
     <>
       <Back onBack={onBack}>{names[pick.tag] || 'Texto'}</Back>
@@ -391,14 +430,24 @@ function ElementPanel({ pick, page, site, upd, onBack }) {
           <Text label="Texto" area rows={4} value={o.text ?? pick.orig} onChange={(v) => set({ text: v === pick.orig ? '' : v })}
             hint="Escribe *así* para cursiva o color de acento, **así** para negrita. Enter = salto de línea." />
         )}
-        {!pick.textEditable && !isImg && <div className="alert info small">Este bloque tiene varias partes. Haz clic en el texto exacto que quieres cambiar.</div>}
+        {pick.inline && <p className="small muted" style={{ margin: '-6px 0 0' }}>También puedes hacer doble clic sobre el texto en la página y escribir ahí (Enter guarda, Esc cancela).</p>}
+        {!pick.textEditable && !isImg && <div className="alert info small">{pick.block && pick.tag !== 'a' ? 'Este bloque agrupa varias partes: aquí puedes ocultarlo, moverlo, duplicarlo o darle estilo. Para cambiar un texto, haz clic sobre él.' : 'Este bloque tiene varias partes. Haz clic en el texto exacto que quieres cambiar.'}</div>}
+        {pick.clone && <div className="alert info small">Este elemento lo agregaste con «Duplicar». Cambia sus textos haciendo clic en ellos.</div>}
         {isLink && pick.isWa && <div className="alert info small">Este botón abre WhatsApp. El número y el mensaje se cambian en «WhatsApp y contacto».</div>}
         {isLink && !pick.isWa && (
           <Text label="¿A dónde lleva?" value={o.href ?? pick.href ?? ''} onChange={(v) => set({ href: v === pick.href ? '' : v })}
             hint="Otra página (contacto.html), una parte (#fechas) o un enlace (https://…)" />
         )}
         {isImg && <ImageInput label="Foto o video" value={o.src ?? pick.src} onChange={(v) => set({ src: v === pick.src ? '' : v })} />}
-        <Check label="Ocultar en la web" checked={!!o.hidden} onChange={(v) => set({ hidden: v })} />
+        {pick.clone
+          ? <button className="btn danger" onClick={() => { upd((d) => removeClone(d, page, pick.clone)); onBack(); }}><Trash2 size={14} /> Eliminar este elemento agregado</button>
+          : <Check label="Ocultar en la web" checked={!!o.hidden} onChange={(v) => set({ hidden: v })} />}
+        {(pick.canDup || pick.parent) && (
+          <div className="row">
+            {pick.canDup && <button className="btn sm" onClick={duplicate} title="Agrega otro igual a continuación de los de su tipo"><Copy size={14} /> Duplicar{o.clones?.length ? ` (${o.clones.length} agregado${o.clones.length > 1 ? 's' : ''})` : ''}</button>}
+            {pick.parent && <button className="btn sm ghost" onClick={() => onSelect(pick.parent.sel)} title="Para ocultar, mover o dar estilo a todo el bloque"><ArrowUp size={14} /> Elegir el bloque: {pick.parent.label}</button>}
+          </div>
+        )}
         <details className="sub-card" open={Object.keys(o.style || {}).length > 0 || !!o.show || !!o.variant}>
           <summary style={{ cursor: 'pointer', fontWeight: 600 }}><Paintbrush size={14} /> Estilo: tamaño, colores, espacios…</summary>
           <div style={{ marginTop: 12 }}>
@@ -418,7 +467,7 @@ function ElementPanel({ pick, page, site, upd, onBack }) {
           </Field>
         )}
         {list.includes(o) && (
-          <button className="btn ghost danger" onClick={() => { upd((d) => { d.overrides[page] = d.overrides[page].filter((x) => x.sel !== pick.sel); }); onBack(); }}>
+          <button className="btn ghost danger" onClick={() => { upd((d) => { for (const id of o.clones || []) removeClone(d, page, id); d.overrides[page] = d.overrides[page].filter((x) => x.sel !== pick.sel); }); onBack(); }}>
             <RotateCcw size={14} /> Volver al original
           </button>
         )}
@@ -530,7 +579,17 @@ function DataPanel({ id, page, site, data, upd, onBack, onPick, onHero, onSeason
             <Text label="Frase principal" value={o.hook} onChange={(v) => set('hook', v)} hint="Ej.: Tu cupo empieza hoy." />
             <Text label="Texto" area rows={3} value={o.p} onChange={(v) => set('p', v)} />
             <Lines label="Datos clave" value={o.facts} onChange={(v) => set('facts', v)} rows={3} />
-            <Text label="Texto del botón" value={o.cta} onChange={(v) => set('cta', v)} />
+            <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+              <Text label="Botón principal" value={o.cta} onChange={(v) => set('cta', v)} placeholder="Texto" />
+              <Text label="Lleva a" value={o.ctaHref} onChange={(v) => set('ctaHref', v)} placeholder="Ej.: contacto.html" />
+            </div>
+            <Check label="Mostrar un segundo botón" checked={!o.noAlt} onChange={(v) => set('noAlt', v ? undefined : true)} />
+            {!o.noAlt && (
+              <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                <Text label="Segundo botón" value={o.altText} onChange={(v) => set('altText', v)} placeholder="Texto (vacío = el de siempre)" />
+                <Text label="Lleva a" value={o.altHref} onChange={(v) => set('altHref', v)} placeholder="Ej.: #cronogramas" />
+              </div>
+            )}
           </div>
         )}
         <ImageInput label="Foto o video" value={(P.media || {})[svc]} onChange={(v) => setIn(['portada', 'media', svc], v)} />
